@@ -518,9 +518,9 @@ def load_historical_data():
             '2025-12-02', '2025-11-25', '2025-11-18', '2025-11-11',
         ]),
         'Longs': [203843, 240024, 273463, 298303, 323975, 320954, 351162, 314412,
-                 296553, 242178, 196658, 190434],
+                 296553, 242178, 196658, 190434,189999],
         'Shorts': [82032, 82245, 80573, 82198, 78703, 81141, 97072, 86286,
-                  79129, 84985, 119042, 144269],
+                  79129, 84985, 119042, 144269,145554],
     })
     
     # ============= AGRICULTURE - 16+ WEEKS HISTORICAL DATA =============
@@ -1457,3 +1457,4 @@ st.caption("✅ **DUPLICATE CHECK**: Won't fetch same data twice")
 st.caption("✅ **EDIT MODE**: Manually add/edit missing data")
 st.caption("✅ **TOGGLE SECTIONS**: Each analysis section can be hidden/shown")
 st.caption("✅ **BIAS SHIFT ALERTS**: Warns when positioning shifts >15% from 13-week average")
+
