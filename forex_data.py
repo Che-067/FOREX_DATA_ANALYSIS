@@ -26,6 +26,7 @@ DATA_DIR.mkdir(exist_ok=True)
 
 EXCEL_STORE_PATH = DATA_DIR / "cot_master_store.xlsx"
 JSON_STORE_PATH = DATA_DIR / "cot_historical_data.json"
+BACKUP_EXCEL_PATH = DATA_DIR / "cot_backup_data.xlsx"
 
 def init_session_state():
     """Initialize all session state variables"""
@@ -37,6 +38,29 @@ def init_session_state():
         st.session_state.extracted_data_count = 0
     if 'fetch_history' not in st.session_state:
         st.session_state.fetch_history = []
+    if 'edit_mode' not in st.session_state:
+        st.session_state.edit_mode = False
+    if 'editable_df' not in st.session_state:
+        st.session_state.editable_df = None
+    if 'current_editing_market' not in st.session_state:
+        st.session_state.current_editing_market = None
+    # Toggle states for analysis sections
+    if 'show_positioning' not in st.session_state:
+        st.session_state.show_positioning = False
+    if 'show_peak' not in st.session_state:
+        st.session_state.show_peak = False
+    if 'show_comparison' not in st.session_state:
+        st.session_state.show_comparison = False
+    if 'show_zones' not in st.session_state:
+        st.session_state.show_zones = False
+    if 'show_rsi' not in st.session_state:
+        st.session_state.show_rsi = False
+    if 'show_myfxbook' not in st.session_state:
+        st.session_state.show_myfxbook = False
+    if 'show_news' not in st.session_state:
+        st.session_state.show_news = False
+    if 'show_plan' not in st.session_state:
+        st.session_state.show_plan = False
 
 init_session_state()
 
@@ -224,7 +248,16 @@ def save_to_json():
     with open(JSON_STORE_PATH, 'w') as f:
         json.dump(data_to_save, f, indent=2)
     
+    # Save to Excel (primary)
     with pd.ExcelWriter(EXCEL_STORE_PATH, engine='openpyxl') as writer:
+        for market, df in st.session_state.markets_df.items():
+            sheet_name = market.replace('/', '_').replace(' ', '_')[:31]
+            df.to_excel(writer, sheet_name=sheet_name, index=False)
+    
+    # Save backup Excel with timestamp
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    backup_path = DATA_DIR / f"cot_backup_{timestamp}.xlsx"
+    with pd.ExcelWriter(backup_path, engine='openpyxl') as writer:
         for market, df in st.session_state.markets_df.items():
             sheet_name = market.replace('/', '_').replace(' ', '_')[:31]
             df.to_excel(writer, sheet_name=sheet_name, index=False)
@@ -267,141 +300,132 @@ def load_historical_data():
     # ----- USD/CAD -----
     markets_df['USD/CAD'] = pd.DataFrame({
         'Date': pd.to_datetime([
-            '2026-01-27', '2026-01-20', '2026-01-13', '2026-01-06',
+            '2026-02-03','2026-01-27', '2026-01-20', '2026-01-13', '2026-01-06',
             '2025-12-30', '2025-12-23', '2025-12-16', '2025-12-09',
             '2025-12-02', '2025-11-25', '2025-11-18', '2025-11-11',
-            '2025-11-04', '2025-10-28', '2025-10-21', '2025-10-14'
         ]),
-        'Longs': [77169, 59456, 62705, 56931, 52787, 41739, 25653, 15794, 
-                  19047, 21438, 24252, 23151, 27186, 28366, 28098, 27162],
-        'Shorts': [93215, 101241, 104955, 97516, 93298, 97532, 112293, 146394, 
-                 169094, 171852, 173351, 180786, 186698, 178410, 173206, 164755],
+        'Longs': [77397,77169, 59456, 62705, 56931, 52787, 41739, 25653, 15794, 
+                  19047, 21438, 24252, 23151],
+        'Shorts': [75267,93215, 101241, 104955, 97516, 93298, 97532, 112293, 146394, 
+                 169094, 171852, 173351, 180786],
     })
     
     # ----- EUR/USD -----
     markets_df['EUR/USD'] = pd.DataFrame({
         'Date': pd.to_datetime([
-            '2026-01-27', '2026-01-20', '2026-01-13', '2026-01-06',
+            '2026-02-03','2026-01-27', '2026-01-20', '2026-01-13', '2026-01-06',
             '2025-12-30', '2025-12-23', '2025-12-16', '2025-12-09',
             '2025-12-02', '2025-11-25', '2025-11-18', '2025-11-11',
-            '2025-11-04', '2025-10-28', '2025-10-21', '2025-10-14'
+            
         ]),
-        'Longs': [290336, 275235, 283592, 298253, 294738, 293179, 277002, 268118,
-                 249672, 244392, 243961, 235920, 252542, 250400, 244507, 243010],
-        'Shorts': [158202, 163540, 150936, 135441, 137273, 133288, 132099, 129330,
-                  141219, 150321, 144954, 162331, 160747, 143067, 132755, 134685],
+        'Longs': [302300,290336, 275235, 283592, 298253, 294738, 293179, 277002, 268118,
+                 249672, 244392, 243961, 235920],
+        'Shorts': [138339,158202, 163540, 150936, 135441, 137273, 133288, 132099, 129330,
+                  141219, 150321, 144954, 162331],
     })
     
     # ----- GBP/USD -----
     markets_df['GBP/USD'] = pd.DataFrame({
         'Date': pd.to_datetime([
-            '2026-01-27', '2026-01-20', '2026-01-13', '2026-01-06',
+            '2026-02-03','2026-01-27', '2026-01-20', '2026-01-13', '2026-01-06',
             '2025-12-30', '2025-12-23', '2025-12-16', '2025-12-09',
             '2025-12-02', '2025-11-25', '2025-11-18', '2025-11-11',
-            '2025-11-04', '2025-10-28', '2025-10-21', '2025-10-14'
         ]),
-        'Longs': [87786, 81332, 79003, 76486, 196003, 198132, 282031, 332405,
-                 299768, 315550, 279341, 272612, 270917, 248118, 233484, 79515],
-        'Shorts': [103948, 103312, 104273, 107024, 69492, 63540, 61968, 60319,
-                  52252, 45257, 53189, 52423, 63117, 82471, 75419, 91144],
+        'Longs': [94893,87786, 81332, 79003, 76486, 196003, 198132, 282031, 332405,
+                 299768, 315550, 279341, 272612],
+        'Shorts': [108804,103948, 103312, 104273, 107024, 69492, 63540, 61968, 60319,
+                  52252, 45257, 53189, 52423],
     })
     
     # ----- USD/JPY -----
     markets_df['USD/JPY'] = pd.DataFrame({
         'Date': pd.to_datetime([
-            '2026-01-27', '2026-01-20', '2026-01-13', '2026-01-06',
+            '2026-02-03','2026-01-27', '2026-01-20', '2026-01-13', '2026-01-06',
             '2025-12-30', '2025-12-23', '2025-12-16', '2025-12-09',
             '2025-12-02', '2025-11-25', '2025-11-18', '2025-11-11',
-            '2025-11-04', '2025-10-28', '2025-10-21', '2025-10-14'
         ]),
-        'Longs': [104460, 107139, 111743, 140441, 144596, 141133, 146275, 184488,
-                  184958, 169218, 169890, 172349, 170180, 178745, 175724, 160639],
-        'Shorts': [138393, 151968, 156907, 131626, 130528, 139910, 149217, 167040,
-                 148540, 142701, 138733, 123873, 118915, 110630, 105310, 123473],
+        'Longs': [114428,104460, 107139, 111743, 140441, 144596, 141133, 146275, 184488,
+                  184958, 169218, 169890, 172349],
+        'Shorts': [133650,138393, 151968, 156907, 131626, 130528, 139910, 149217, 167040,
+                 148540, 142701, 138733, 123873],
     })
     
     # ----- USD/ZAR -----
     markets_df['USD/ZAR'] = pd.DataFrame({
         'Date': pd.to_datetime([
-            '2026-01-27', '2026-01-20', '2026-01-13', '2026-01-06',
+            '2026-02-03','2026-01-27', '2026-01-20', '2026-01-13', '2026-01-06',
             '2025-12-30', '2025-12-23', '2025-12-16', '2025-12-09',
             '2025-12-02', '2025-11-25', '2025-11-18', '2025-11-11',
-            '2025-11-04', '2025-10-28', '2025-10-21', '2025-10-14'
         ]),
-        'Longs': [17299, 16757, 16425, 16197, 15516, 14908, 13163, 12772,
-                  12935, 12834, 14185, 13573, 14314, 15488, 15475, 15080],
-        'Shorts': [8217, 8301, 9315, 10291, 10395, 10060, 10326, 7034,
-                 6198, 5395, 6664, 6053, 5821, 6839, 6500, 7024],
+        'Longs': [15993,17299, 16757, 16425, 16197, 15516, 14908, 13163, 12772,
+                  12935, 12834, 14185, 13573],
+        'Shorts': [6313,8217, 8301, 9315, 10291, 10395, 10060, 10326, 7034,
+                 6198, 5395, 6664, 6053],
     })
     
     # ----- USD/MXN -----
     markets_df['USD/MXN'] = pd.DataFrame({
         'Date': pd.to_datetime([
-            '2026-01-27', '2026-01-20', '2026-01-13', '2026-01-06',
+            '2026-02-03','2026-01-27', '2026-01-20', '2026-01-13', '2026-01-06',
             '2025-12-30', '2025-12-23', '2025-12-16', '2025-12-09',
             '2025-12-02', '2025-11-25', '2025-11-18', '2025-11-11',
-            '2025-11-04', '2025-10-28', '2025-10-21', '2025-10-14'
         ]),
-        'Longs': [149094, 153398, 153670, 161616, 162240, 164985, 158447, 153728,
-                  149102, 126551, 132165, 118511, 113164, 116489, 99658, 95674],
-        'Shorts': [45980, 46245, 50112, 52315, 55874, 63809, 71335, 46752,
-                 50162, 31364, 36337, 33330, 26988, 34985, 26316, 28113],
+        'Longs': [132392,149094, 153398, 153670, 161616, 162240, 164985, 158447, 153728,
+                  149102, 126551, 132165, 118511],
+        'Shorts': [41800,45980, 46245, 50112, 52315, 55874, 63809, 71335, 46752,
+                 50162, 31364, 36337, 33330],
     })
     
     # ----- NZD/USD -----
     markets_df['NZD/USD'] = pd.DataFrame({
         'Date': pd.to_datetime([
-            '2026-01-27', '2026-01-20', '2026-01-13', '2026-01-06',
+            '2026-02-03','2026-01-27', '2026-01-20', '2026-01-13', '2026-01-06',
             '2025-12-30', '2025-12-23', '2025-12-16', '2025-12-09',
             '2025-12-02', '2025-11-25', '2025-11-18', '2025-11-11',
-            '2025-11-04', '2025-10-28', '2025-10-21', '2025-10-14'
         ]),
-        'Longs': [12074, 13670, 9613, 12971, 8706, 9596, 8129, 14333,
-                 18394, 23477, 24211, 28677, 25314, 24330, 25478, 25599],
-        'Shorts': [59819, 63280, 58464, 56334, 51960, 53630, 56172, 71114,
-                  71510, 75548, 73468, 72746, 62726, 59296, 61753, 55340],
+        'Longs': [11883,12074, 13670, 9613, 12971, 8706, 9596, 8129, 14333,
+                 18394, 23477, 24211, 28677],
+        'Shorts': [46177,59819, 63280, 58464, 56334, 51960, 53630, 56172, 71114,
+                  71510, 75548, 73468, 72746],
     })
     
     # ----- AUD/USD -----
     markets_df['AUD/USD'] = pd.DataFrame({
         'Date': pd.to_datetime([
-            '2026-01-27', '2026-01-20', '2026-01-13', '2026-01-06',
+            '2026-02-03','2026-01-27', '2026-01-20', '2026-01-13', '2026-01-06',
             '2025-12-30', '2025-12-23', '2025-12-16', '2025-12-09',
             '2025-12-02', '2025-11-25', '2025-11-18', '2025-11-11',
-            '2025-11-04', '2025-10-28', '2025-10-21', '2025-10-14'
         ]),
-        'Longs': [109806, 85759, 83955, 80491, 77497, 70657, 67640, 57569,
-                 45868, 43918, 45721, 43114, 50360, 41715, 51794, 50324],
-        'Shorts': [102660, 99770, 102801, 99451, 98713, 92255, 89535, 120516,
-                  129261, 128094, 121577, 121741, 121936, 115649, 117558, 109902],
+        'Longs': [118751,109806, 85759, 83955, 80491, 77497, 70657, 67640, 57569,
+                 45868, 43918, 45721, 43114],
+        'Shorts': [92633,102660, 99770, 102801, 99451, 98713, 92255, 89535, 120516,
+                  129261, 128094, 121577, 121741],
     })
     
     # ----- USD/BRL -----
     markets_df['USD/BRL'] = pd.DataFrame({
         'Date': pd.to_datetime([
-            '2026-01-27', '2026-01-20', '2026-01-13', '2026-01-06',
+            '2026-02-03','2026-01-27', '2026-01-20', '2026-01-13', '2026-01-06',
             '2025-12-30', '2025-12-23', '2025-12-16', '2025-12-09',
             '2025-12-02', '2025-11-25', '2025-11-18', '2025-11-11',
-            '2025-11-04', '2025-10-28', '2025-10-21', '2025-10-14'
         ]),
-        'Longs': [56027, 53730, 52400, 48051, 60132, 61596, 66955, 74505,
-                  74586, 71274, 74494, 74487, 67193, 75220, 75904, 75781],
-        'Shorts': [37182, 36089, 34526, 30434, 18023, 13921, 18949, 17071,
-                 13740, 14493, 20675, 17082, 15980, 21390, 20752, 19672],
+        'Longs': [57232,56027, 53730, 52400, 48051, 60132, 61596, 66955, 74505,
+                  74586, 71274, 74494, 74487],
+        'Shorts': [26270,37182, 36089, 34526, 30434, 18023, 13921, 18949, 17071,
+                 13740, 14493, 20675, 17082],
     })
     
     # ----- USD/CHF -----
     markets_df['USD/CHF'] = pd.DataFrame({
         'Date': pd.to_datetime([
-            '2026-01-27', '2026-01-20', '2026-01-13', '2026-01-06',
+            '2026-02-03','2026-01-27', '2026-01-20', '2026-01-13', '2026-01-06',
             '2025-12-30', '2025-12-23', '2025-12-16', '2025-12-09',
             '2025-12-02', '2025-11-25', '2025-11-18', '2025-11-11',
-            '2025-11-04', '2025-10-28', '2025-10-21', '2025-10-14'
         ]),
-        'Longs': [9724, 12257, 13395, 11077, 8910, 8780, 9448, 8456,
-                  6894, 7571, 8746, 7403, 8809, 9149, 7366, 8407],
-        'Shorts': [52617, 55464, 56787, 51434, 53108, 52769, 48355, 47059,
-                 42679, 42931, 40931, 43452, 40696, 37007, 35210, 36613],
+        'Longs': [9687,9724, 12257, 13395, 11077, 8910, 8780, 9448, 8456,
+                  6894, 7571, 8746, 7403],
+        'Shorts': [50404,52617, 55464, 56787, 51434, 53108, 52769, 48355, 47059,
+                 42679, 42931, 40931, 43452],
     })
     
     # ============= METALS - 16+ WEEKS HISTORICAL DATA =============
@@ -409,71 +433,66 @@ def load_historical_data():
     # ----- XAU/USD (GOLD) -----
     markets_df['XAU/USD'] = pd.DataFrame({
         'Date': pd.to_datetime([
-            '2026-01-27', '2026-01-20', '2026-01-13', '2026-01-06',
+            '2026-02-03','2026-01-27', '2026-01-20', '2026-01-13', '2026-01-06',
             '2025-12-30', '2025-12-23', '2025-12-16', '2025-12-09',
             '2025-12-02', '2025-11-25', '2025-11-18', '2025-11-11',
-            '2025-11-04', '2025-10-28', '2025-10-21', '2025-10-14'
         ]),
-        'Longs': [252100, 295772, 296183, 274435, 275592, 290161, 280920, 268485,
-                 261331, 253266, 269556, 265916, 256572, 266308, 253851, 278405],
-        'Shorts': [46704, 51002, 44945, 46803, 44419, 49461, 46942, 44599,
-                  43771, 48678, 59217, 58847, 54265, 61644, 77242, 74489],
+        'Longs': [214508,252100, 295772, 296183, 274435, 275592, 290161, 280920, 268485,
+                 261331, 253266, 269556, 265916],
+        'Shorts': [48904,46704, 51002, 44945, 46803, 44419, 49461, 46942, 44599,
+                  43771, 48678, 59217, 58847],
     })
     
     # ----- XAG/USD (SILVER) -----
     markets_df['XAG/USD'] = pd.DataFrame({
         'Date': pd.to_datetime([
-            '2026-01-27', '2026-01-20', '2026-01-13', '2026-01-06',
+            '2026-02-03','2026-01-27', '2026-01-20', '2026-01-13', '2026-01-06',
             '2025-12-30', '2025-12-23', '2025-12-16', '2025-12-09',
             '2025-12-02', '2025-11-25', '2025-11-18', '2025-11-11',
-            '2025-11-04', '2025-10-28', '2025-10-21', '2025-10-14'
         ]),
-        'Longs': [43475, 42965, 47337, 47384, 50506, 55243, 56034, 65958,
-                 59575, 52002, 54535, 55038, 54166, 55959, 60904, 67041],
-        'Shorts': [19772, 17751, 15277, 18113, 20443, 19359, 19682, 21249,
-                  21056, 19814, 20519, 22052, 20945, 18840, 23645, 23860],
+        'Longs': [38883,43475, 42965, 47337, 47384, 50506, 55243, 56034, 65958,
+                 59575, 52002, 54535, 55038],
+        'Shorts': [13006,19772, 17751, 15277, 18113, 20443, 19359, 19682, 21249,
+                  21056, 19814, 20519, 22052],
     })
     
     # ----- COPPER/USD -----
     markets_df['COPPER/USD'] = pd.DataFrame({
         'Date': pd.to_datetime([
-            '2024-07-23', '2024-07-16', '2024-07-09', '2024-07-02',
-            '2024-06-25', '2024-06-18', '2024-06-11', '2024-06-04',
-            '2024-05-28', '2024-05-21', '2024-05-14', '2024-05-07',
-            '2024-04-30', '2024-04-23', '2024-04-16', '2024-04-09'
+            '2026-02-03','2026-01-27', '2026-01-20', '2026-01-13', '2026-01-06',
+            '2025-12-30', '2025-12-23', '2025-12-16', '2025-12-09',
+            '2025-12-02', '2025-11-25', '2025-11-18', '2025-11-11',
         ]),
-        'Longs': [188489, 183287, 135316, 106753, 102547, 105920, 110300, 102118,
-                 93041, 61538, 48674, 51777, 43668, 48459, 71800, 80000],
-        'Shorts': [46306, 50358, 50626, 44712, 58499, 58299, 58179, 58908,
-                  67639, 67485, 68749, 73590, 72658, 74692, 63181, 51748],
+        'Longs': [97407,188489, 183287, 135316, 106753, 102547, 105920, 110300, 102118,
+                 93041, 61538, 48674, 51777],
+        'Shorts': [49593,46306, 50358, 50626, 44712, 58499, 58299, 58179, 58908,
+                  67639, 67485, 68749, 73590],
     })
     
     # ----- STEEL-HRC/USD -----
     markets_df['STEEL-HRC/USD'] = pd.DataFrame({
         'Date': pd.to_datetime([
-            '2026-01-27', '2026-01-20', '2026-01-13', '2026-01-06',
+            '2026-02-03','2026-01-27', '2026-01-20', '2026-01-13', '2026-01-06',
             '2025-12-30', '2025-12-23', '2025-12-16', '2025-12-09',
             '2025-12-02', '2025-11-25', '2025-11-18', '2025-11-11',
-            '2025-11-04', '2025-10-28', '2025-10-21', '2025-10-14'
         ]),
-        'Longs': [14856, 14235, 13437, 12020, 12852, 12180, 11332, 10402,
-                 8682, 9326, 8866, 7583, 7527, 8696, 6182, 6348],
-        'Shorts': [2516, 2564, 2415, 2543, 2791, 2236, 2403, 2366,
-                  2669, 3400, 2867, 2807, 3030, 4756, 4087, 4189],
+        'Longs': [13849,14856, 14235, 13437, 12020, 12852, 12180, 11332, 10402,
+                 8682, 9326, 8866, 7583],
+        'Shorts': [2362,2516, 2564, 2415, 2543, 2791, 2236, 2403, 2366,
+                  2669, 3400, 2867, 2807],
     })
     
     # ----- LITHIUM/USD -----
     markets_df['LITHIUM/USD'] = pd.DataFrame({
         'Date': pd.to_datetime([
-            '2026-01-27', '2026-01-20', '2026-01-13', '2026-01-06',
+            '2026-02-03','2026-01-27', '2026-01-20', '2026-01-13', '2026-01-06',
             '2025-12-30', '2025-12-23', '2025-12-16', '2025-12-09',
             '2025-12-02', '2025-11-25', '2025-11-18', '2025-11-11',
-            '2025-11-04', '2025-10-28', '2025-10-21', '2025-10-14'
         ]),
-        'Longs': [3263, 3499, 3631, 4046, 4198, 4126, 4293, 4406,
-                 4376, 4919, 5074, 5252, 5168, 5223, 5731, 5661],
-        'Shorts': [11352, 11348, 10525, 9888, 12155, 11710, 12482, 13046,
-                  13071, 14818, 14889, 14923, 14789, 16006, 16506, 16234],
+        'Longs': [2881,3263, 3499, 3631, 4046, 4198, 4126, 4293, 4406,
+                 4376, 4919, 5074, 5252],
+        'Shorts': [10839,11352, 11348, 10525, 9888, 12155, 11710, 12482, 13046,
+                  13071, 14818, 14889, 14923],
     })
     
     # ============= ENERGIES - 16+ WEEKS HISTORICAL DATA =============
@@ -481,29 +500,27 @@ def load_historical_data():
     # ----- CRUDE OIL/USD -----
     markets_df['CRUDE OIL/USD'] = pd.DataFrame({
         'Date': pd.to_datetime([
-            '2026-01-27', '2026-01-20', '2026-01-13', '2026-01-06',
+            '2026-02-03','2026-01-27', '2026-01-20', '2026-01-13', '2026-01-06',
             '2025-12-30', '2025-12-23', '2025-12-16', '2025-12-09',
             '2025-12-02', '2025-11-25', '2025-11-18', '2025-11-11',
-            '2025-11-04', '2025-10-28', '2025-10-21', '2025-10-14'
         ]),
-        'Longs': [145710, 142097, 146531, 141251, 130251, 122362, 136298, 141636,
-                 109644, 107447, 120683, 125340, 138046, 115809, 121537, 119311],
-        'Shorts': [76266, 76986, 75225, 71878, 67713, 69985, 72507, 67101,
-                  72858, 80769, 77700, 74886, 75696, 74607, 77712, 77893],
+        'Longs': [151103,145710, 142097, 146531, 141251, 130251, 122362, 136298, 141636,
+                 109644, 107447, 120683, 125340],
+        'Shorts': [73241,76266, 76986, 75225, 71878, 67713, 69985, 72507, 67101,
+                  72858, 80769, 77700, 74886],
     })
     
     # ----- NAT GAS/USD -----
     markets_df['NAT GAS/USD'] = pd.DataFrame({
         'Date': pd.to_datetime([
+            '2026-02-03','2026-01-27', '2026-01-20', '2026-01-13', '2026-01-06',
             '2025-12-30', '2025-12-23', '2025-12-16', '2025-12-09',
             '2025-12-02', '2025-11-25', '2025-11-18', '2025-11-11',
-            '2025-11-04', '2025-10-28', '2025-10-21', '2025-10-14',
-            '2025-10-07', '2025-09-30', '2025-09-23', '2025-09-16'
         ]),
         'Longs': [203843, 240024, 273463, 298303, 323975, 320954, 351162, 314412,
-                 296553, 242178, 196658, 190434, 186808, 161500, 165944, 167351],
+                 296553, 242178, 196658, 190434],
         'Shorts': [82032, 82245, 80573, 82198, 78703, 81141, 97072, 86286,
-                  79129, 84985, 119042, 144269, 146934, 169833, 160196, 146164],
+                  79129, 84985, 119042, 144269],
     })
     
     # ============= AGRICULTURE - 16+ WEEKS HISTORICAL DATA =============
@@ -511,24 +528,22 @@ def load_historical_data():
     # ----- COFFEE/USD -----
     markets_df['COFFEE/USD'] = pd.DataFrame({
         'Date': pd.to_datetime([
-            '2026-01-27', '2026-01-20', '2026-01-13', '2026-01-06',
+            '2026-02-03','2026-01-27', '2026-01-20', '2026-01-13', '2026-01-06',
             '2025-12-30', '2025-12-23', '2025-12-16', '2025-12-09',
             '2025-12-02', '2025-11-25', '2025-11-18', '2025-11-11',
-            '2025-11-04', '2025-10-28', '2025-10-21', '2025-10-14'
         ]),
-        'Longs': [57118, 56009, 57888, 56382, 53068, 53105, 58241, 60286,
-                 60948, 61210, 63537, 69746, 68887, 69173, 69913, 67699],
-        'Shorts': [24384, 26246, 25136, 25846, 28525, 29432, 28337, 25539,
-                  25598, 25223, 25007, 26449, 24629, 25028, 25570, 25401],
+        'Longs': [49342,57118, 56009, 57888, 56382, 53068, 53105, 58241, 60286,
+                 60948, 61210, 63537, 69746],
+        'Shorts': [30978,24384, 26246, 25136, 25846, 28525, 29432, 28337, 25539,
+                  25598, 25223, 25007, 26449],
     })
     
     # ----- WHEAT SRW/USD -----
     markets_df['WHEAT SRW/USD'] = pd.DataFrame({
         'Date': pd.to_datetime([
-            '2026-01-27', '2026-01-20', '2026-01-13', '2026-01-06',
+            '2026-02-03','2026-01-27', '2026-01-20', '2026-01-13', '2026-01-06',
             '2025-12-30', '2025-12-23', '2025-12-16', '2025-12-09',
             '2025-12-02', '2025-11-25', '2025-11-18', '2025-11-11',
-            '2025-11-04', '2025-10-28', '2025-10-21', '2025-10-14'
         ]),
         'Longs': [119821, 124615, 128167, 127991, 132115, 134314, 133339, 123773,
                  116502, 105562, 110378, 118609, 125795, 148755, 149938, 151616],
@@ -539,10 +554,9 @@ def load_historical_data():
     # ----- WHEAT HRW/USD -----
     markets_df['WHEAT HRW/USD'] = pd.DataFrame({
         'Date': pd.to_datetime([
-            '2026-01-27', '2026-01-20', '2026-01-13', '2026-01-06',
+            '2026-02-03','2026-01-27', '2026-01-20', '2026-01-13', '2026-01-06',
             '2025-12-30', '2025-12-23', '2025-12-16', '2025-12-09',
             '2025-12-02', '2025-11-25', '2025-11-18', '2025-11-11',
-            '2025-11-04', '2025-10-28', '2025-10-21', '2025-10-14'
         ]),
         'Longs': [79923, 82290, 86843, 89618, 84515, 83434, 85510, 78437,
                  70860, 71772, 75561, 79903, 77673, 85613, 91300, 92053],
@@ -555,15 +569,14 @@ def load_historical_data():
     # ----- MICRO-BTC/USD -----
     markets_df['MICRO-BTC/USD'] = pd.DataFrame({
         'Date': pd.to_datetime([
-            '2026-01-27', '2026-01-20', '2026-01-13', '2026-01-06',
+            '2026-02-03','2026-01-27', '2026-01-20', '2026-01-13', '2026-01-06',
             '2025-12-30', '2025-12-23', '2025-12-16', '2025-12-09',
             '2025-12-02', '2025-11-25', '2025-11-18', '2025-11-11',
-            '2025-11-04', '2025-10-28', '2025-10-21', '2025-10-14'
         ]),
-        'Longs': [18878, 23797, 21863, 19367, 14385, 21221, 24217, 23124,
-                 20378, 34029, 28971, 25475, 22032, 32695, 32448, 26134],
-        'Shorts': [26154, 29254, 26851, 24303, 18343, 26469, 29513, 27994,
-                  25413, 40626, 34110, 30669, 27077, 37814, 38100, 31553],
+        'Longs': [17822,18878, 23797, 21863, 19367, 14385, 21221, 24217, 23124,
+                 20378, 34029, 28971, 25475],
+        'Shorts': [24081,26154, 29254, 26851, 24303, 18343, 26469, 29513, 27994,
+                  25413, 40626, 34110, 30669],
     })
     
     # Calculate derived columns for ALL markets
@@ -778,11 +791,30 @@ def add_new_data(markets_df, display_name, new_date, new_data):
     return markets_df
 
 # -------------------------------
-# ENHANCED MARKET ANALYSIS WITH PEAK VALUES
+# DATA EDITING FUNCTIONS
+# -------------------------------
+
+def save_edited_data(market, edited_df):
+    """Save edited data back to session state"""
+    st.session_state.markets_df[market] = edited_df
+    save_to_json()  # Auto-save after edits
+    st.session_state.edit_mode = False
+    st.session_state.editable_df = None
+    st.session_state.current_editing_market = None
+    st.success(f"✅ Data for {market} updated successfully!")
+
+def cancel_edit():
+    """Cancel editing mode"""
+    st.session_state.edit_mode = False
+    st.session_state.editable_df = None
+    st.session_state.current_editing_market = None
+
+# -------------------------------
+# ENHANCED MARKET ANALYSIS WITH PEAK VALUES AND TOGGLE SECTIONS
 # -------------------------------
 
 def analyze_market_with_peaks(df, market_name):
-    """Comprehensive market analysis including peak/min values"""
+    """Comprehensive market analysis including peak/min values with toggle sections"""
     
     recent_13 = df.tail(13).copy()
     latest = recent_13.iloc[-1]
@@ -790,6 +822,10 @@ def analyze_market_with_peaks(df, market_name):
     avg_longs = recent_13['Longs'].mean()
     avg_shorts = recent_13['Shorts'].mean()
     avg_net = recent_13['Net'].mean()
+    
+    # Calculate bias shift indicators
+    longs_vs_avg = ((latest['Longs'] - avg_longs) / avg_longs * 100)
+    shorts_vs_avg = ((latest['Shorts'] - avg_shorts) / avg_shorts * 100)
     
     # Get peak values for this market
     peaks = PEAK_VOLUME_VALUES.get(market_name, {'has_peaks': False})
@@ -800,136 +836,220 @@ def analyze_market_with_peaks(df, market_name):
     analysis.append(f"## 📊 COMPLETE ANALYSIS: {market_name}")
     analysis.append("---")
     
-    # ==================== SECTION 1: CURRENT POSITIONING ====================
-    analysis.append("### 🎯 CURRENT INSTITUTIONAL POSITIONING")
-    analysis.append(f"- **Longs:** {latest['Longs']:,.0f} ({latest['Long %']:.1f}%)")
-    analysis.append(f"- **Shorts:** {latest['Shorts']:,.0f} ({latest['Short %']:.1f}%)")
-    analysis.append(f"- **Net Position:** {latest['Net']:+,.0f}")
+    # ==================== BIAS SHIFT WARNING ====================
+    if abs(longs_vs_avg) > 15 or abs(shorts_vs_avg) > 15:
+        analysis.append("### ⚠️ **BIAS SHIFT DETECTED!**")
+        if longs_vs_avg > 15:
+            analysis.append(f"🔥 **LONGS shifting BULLISH** - {longs_vs_avg:+.1f}% above 13-week average")
+            analysis.append("🎯 **Watch DEMAND ZONES carefully as price approaches**")
+        elif longs_vs_avg < -15:
+            analysis.append(f"📉 **LONGS shifting BEARISH** - {longs_vs_avg:+.1f}% below 13-week average")
+            analysis.append("🎯 **Watch SUPPLY ZONES carefully as price approaches**")
+        
+        if shorts_vs_avg > 15:
+            analysis.append(f"🔥 **SHORTS shifting BEARISH** - {shorts_vs_avg:+.1f}% above 13-week average")
+            analysis.append("🎯 **Watch SUPPLY ZONES carefully as price approaches**")
+        elif shorts_vs_avg < -15:
+            analysis.append(f"📈 **SHORTS shifting BULLISH** - {shorts_vs_avg:+.1f}% below 13-week average")
+            analysis.append("🎯 **Watch DEMAND ZONES carefully as price approaches**")
+        analysis.append("---")
     
-    if latest['Long %'] >= 70:
-        analysis.append("🔥 **EXTREME BULLISH** - 70%+ long concentration")
-    elif latest['Short %'] >= 70:
-        analysis.append("🔥 **EXTREME BEARISH** - 70%+ short concentration")
+    # ==================== SECTION 1: CURRENT POSITIONING ====================
+    if st.session_state.show_positioning:
+        analysis.append("### 🎯 CURRENT INSTITUTIONAL POSITIONING")
+        analysis.append(f"- **Longs:** {latest['Longs']:,.0f} ({latest['Long %']:.1f}%)")
+        analysis.append(f"- **Shorts:** {latest['Shorts']:,.0f} ({latest['Short %']:.1f}%)")
+        analysis.append(f"- **Net Position:** {latest['Net']:+,.0f}")
+        
+        if latest['Long %'] >= 70:
+            analysis.append("🔥 **EXTREME BULLISH** - 70%+ long concentration")
+        elif latest['Short %'] >= 70:
+            analysis.append("🔥 **EXTREME BEARISH** - 70%+ short concentration")
+        analysis.append("")
     
     # ==================== SECTION 2: PEAK VOLUME ANALYSIS ====================
-    analysis.append("\n### 📈 PEAK VOLUME ANALYSIS")
-    
-    if peaks['has_peaks']:
-        if peaks['peak_longs']:
-            longs_pct_of_peak = (latest['Longs'] / peaks['peak_longs'] * 100)
-            analysis.append(f"\n**Longs:** {latest['Longs']:,.0f} vs Peak {peaks['peak_longs']:,.0f} ({longs_pct_of_peak:.1f}%)")
+    if st.session_state.show_peak:
+        analysis.append("### 📈 PEAK VOLUME ANALYSIS")
+        
+        if peaks['has_peaks']:
+            if peaks['peak_longs']:
+                longs_pct_of_peak = (latest['Longs'] / peaks['peak_longs'] * 100)
+                analysis.append(f"\n**Longs:** {latest['Longs']:,.0f} vs Peak {peaks['peak_longs']:,.0f} ({longs_pct_of_peak:.1f}%)")
+                
+                if longs_pct_of_peak >= 98:
+                    analysis.append("🔴 **CRITICAL: AT ALL-TIME HIGH** - Swift reversal expected!")
+                    analysis.append("   → Look for **SUPPLY ZONES** above current price")
+                elif longs_pct_of_peak >= 95:
+                    analysis.append("⚠️ **CRITICAL: APPROACHING ALL-TIME HIGH**")
+                    analysis.append("   → Prepare for potential reversal at supply zones")
+                elif longs_pct_of_peak >= 90:
+                    analysis.append("📊 **Near peak levels** - Monitor for exhaustion at supply")
             
-            if longs_pct_of_peak >= 98:
-                analysis.append("🔴 **CRITICAL: AT ALL-TIME HIGH** - Swift reversal expected!")
-                analysis.append("   → Look for supply zones above current price")
-            elif longs_pct_of_peak >= 95:
-                analysis.append("⚠️ **CRITICAL: APPROACHING ALL-TIME HIGH**")
-                analysis.append("   → Prepare for potential reversal")
-            elif longs_pct_of_peak >= 90:
-                analysis.append("📊 **Near peak levels** - Monitor for exhaustion")
-        
-        if peaks['peak_shorts']:
-            shorts_pct_of_peak = (latest['Shorts'] / peaks['peak_shorts'] * 100)
-            analysis.append(f"\n**Shorts:** {latest['Shorts']:,.0f} vs Peak {peaks['peak_shorts']:,.0f} ({shorts_pct_of_peak:.1f}%)")
+            if peaks['peak_shorts']:
+                shorts_pct_of_peak = (latest['Shorts'] / peaks['peak_shorts'] * 100)
+                analysis.append(f"\n**Shorts:** {latest['Shorts']:,.0f} vs Peak {peaks['peak_shorts']:,.0f} ({shorts_pct_of_peak:.1f}%)")
+                
+                if shorts_pct_of_peak >= 98:
+                    analysis.append("🔴 **CRITICAL: SHORTS AT ALL-TIME HIGH** - Short squeeze imminent!")
+                    analysis.append("   → Look for **DEMAND ZONES** below current price")
+                elif shorts_pct_of_peak >= 95:
+                    analysis.append("⚠️ **CRITICAL: SHORTS APPROACHING ALL-TIME HIGH**")
+                    analysis.append("   → Prepare for potential short squeeze at demand zones")
+                elif shorts_pct_of_peak >= 90:
+                    analysis.append("📊 **Shorts near peak** - Monitor for covering at demand")
             
-            if shorts_pct_of_peak >= 98:
-                analysis.append("🔴 **CRITICAL: SHORTS AT ALL-TIME HIGH** - Short squeeze imminent!")
-                analysis.append("   → Look for demand zones below current price")
-            elif shorts_pct_of_peak >= 95:
-                analysis.append("⚠️ **CRITICAL: SHORTS APPROACHING ALL-TIME HIGH**")
-                analysis.append("   → Prepare for potential short squeeze")
-            elif shorts_pct_of_peak >= 90:
-                analysis.append("📊 **Shorts near peak** - Monitor for covering")
-        
-        if peaks['min_longs'] and latest['Longs'] <= peaks['min_longs'] * 1.1:
-            analysis.append(f"\n🟢 **Longs at historic lows** - Potential market bottom")
-        
-        if peaks['min_shorts'] and latest['Shorts'] <= peaks['min_shorts'] * 1.1:
-            analysis.append(f"\n🔴 **Shorts at historic lows** - Potential market top")
-    else:
-        analysis.append("📊 No peak volume data available for this market")
+            if peaks['min_longs'] and latest['Longs'] <= peaks['min_longs'] * 1.1:
+                analysis.append(f"\n🟢 **Longs at historic lows** - Potential **DEMAND ZONE** forming")
+            
+            if peaks['min_shorts'] and latest['Shorts'] <= peaks['min_shorts'] * 1.1:
+                analysis.append(f"\n🔴 **Shorts at historic lows** - Potential **SUPPLY ZONE** forming")
+        else:
+            analysis.append("📊 No peak volume data available for this market")
+        analysis.append("")
     
     # ==================== SECTION 3: 13-WEEK COMPARISON ====================
-    analysis.append("\n### 📊 13-WEEK AVERAGE COMPARISON")
-    
-    longs_vs_avg = ((latest['Longs'] - avg_longs) / avg_longs * 100)
-    shorts_vs_avg = ((latest['Shorts'] - avg_shorts) / avg_shorts * 100)
-    
-    analysis.append(f"- **Longs:** {latest['Longs']:,.0f} vs 13wk avg {avg_longs:,.0f} ({longs_vs_avg:+.1f}%)")
-    analysis.append(f"- **Shorts:** {latest['Shorts']:,.0f} vs 13wk avg {avg_shorts:,.0f} ({shorts_vs_avg:+.1f}%)")
-    analysis.append(f"- **Net:** {latest['Net']:+,.0f} vs 13wk avg {avg_net:+,.0f}")
-    
-    if abs(longs_vs_avg) > 20:
-        analysis.append(f"\n{'📈' if longs_vs_avg > 0 else '📉'} **Significant deviation** in long positioning")
-    if abs(shorts_vs_avg) > 20:
-        analysis.append(f"{'📉' if shorts_vs_avg > 0 else '📈'} **Significant deviation** in short positioning")
+    if st.session_state.show_comparison:
+        analysis.append("### 📊 13-WEEK AVERAGE COMPARISON")
+        analysis.append(f"- **Longs:** {latest['Longs']:,.0f} vs 13wk avg {avg_longs:,.0f} ({longs_vs_avg:+.1f}%)")
+        analysis.append(f"- **Shorts:** {latest['Shorts']:,.0f} vs 13wk avg {avg_shorts:,.0f} ({shorts_vs_avg:+.1f}%)")
+        analysis.append(f"- **Net:** {latest['Net']:+,.0f} vs 13wk avg {avg_net:+,.0f}")
+        
+        if abs(longs_vs_avg) > 20:
+            analysis.append(f"\n{'📈' if longs_vs_avg > 0 else '📉'} **Significant deviation** in long positioning")
+        if abs(shorts_vs_avg) > 20:
+            analysis.append(f"{'📉' if shorts_vs_avg > 0 else '📈'} **Significant deviation** in short positioning")
+        analysis.append("")
     
     # ==================== SECTION 4: SUPPLY/DEMAND ZONES ====================
-    analysis.append("\n### 🎯 KEY SUPPLY/DEMAND ZONES")
+    if st.session_state.show_zones:
+        analysis.append("### 🎯 KEY SUPPLY/DEMAND ZONES")
+        
+        if latest['Long %'] >= 70:
+            analysis.append("**📈 DEMAND ZONE** (Institutional Buying)")
+            analysis.append("- **Location:** Recent swing lows")
+            analysis.append("- **Strategy:** Buy on pullbacks to demand zone")
+            analysis.append("- **Stop Loss:** Below the demand zone low")
+            analysis.append("- **RSI Confirmation:** Look for RSI > 40 to confirm demand zone holding")
+        elif latest['Short %'] >= 70:
+            analysis.append("**📉 SUPPLY ZONE** (Institutional Selling)")
+            analysis.append("- **Location:** Recent swing highs")
+            analysis.append("- **Strategy:** Sell on rallies to supply zone")
+            analysis.append("- **Stop Loss:** Above the supply zone high")
+            analysis.append("- **RSI Confirmation:** Look for RSI < 60 to confirm supply zone holding")
+        else:
+            analysis.append("**📊 RANGE BOUNDARIES**")
+            analysis.append("- **Demand Zone:** Recent swing lows")
+            analysis.append("- **Supply Zone:** Recent swing highs")
+            analysis.append("- **Strategy:** Buy at demand, sell at supply")
+            analysis.append("- **RSI Confirmation:** RSI < 30 at demand, RSI > 70 at supply")
+        analysis.append("")
     
-    if latest['Long %'] >= 70:
-        analysis.append("**DEMAND ZONE** (Institutional Buying)")
-        analysis.append("- Location: Recent swing lows")
-        analysis.append("- Strategy: Buy on pullbacks")
-        analysis.append("- Stop: Below zone low")
-    elif latest['Short %'] >= 70:
-        analysis.append("**SUPPLY ZONE** (Institutional Selling)")
-        analysis.append("- Location: Recent swing highs")
-        analysis.append("- Strategy: Sell on rallies")
-        analysis.append("- Stop: Above zone high")
-    else:
-        analysis.append("**RANGE BOUNDARIES**")
-        analysis.append("- Support: Recent swing lows")
-        analysis.append("- Resistance: Recent swing highs")
-        analysis.append("- Strategy: Buy support, sell resistance")
+    # ==================== SECTION 5: RSI CONFIRMATION ====================
+    if st.session_state.show_rsi:
+        analysis.append("### 📊 RSI CONFIRMATION LEVELS")
+        analysis.append("**RSI (Relative Strength Index) Rules:**")
+        analysis.append("- **RSI > 40** suggests DEMAND ZONE will likely hold (bullish)")
+        analysis.append("- **RSI < 60** suggests SUPPLY ZONE will likely hold (bearish)")
+        analysis.append("- **RSI < 30** at demand zone = oversold bounce potential")
+        analysis.append("- **RSI > 70** at supply zone = overbought reversal potential")
+        analysis.append("\n*Note: Check your chart for actual RSI values*")
+        analysis.append("")
     
-    # ==================== SECTION 5: ACTIONABLE TRADING PLAN ====================
-    analysis.append("\n### 📋 TRADING PLAN")
+    # ==================== SECTION 6: MYFXBOOK SENTIMENT ====================
+    if st.session_state.show_myfxbook:
+        analysis.append("### 👥 MYFXBOOK RETAIL SENTIMENT")
+        analysis.append("**Contrarian Trading Signals:**")
+        
+        if latest['Long %'] >= 70:
+            analysis.append("- **🔥 Institutional long extreme** → Check MyFxBook for retail long crowd")
+            analysis.append("- **CONTRARIAN:** If retail is also long, consider fading the move")
+            analysis.append("- **Confirmation:** Wait for retail sentiment to peak before trading against")
+        elif latest['Short %'] >= 70:
+            analysis.append("- **🔥 Institutional short extreme** → Check MyFxBook for retail short crowd")
+            analysis.append("- **CONTRARIAN:** If retail is also short, prepare for reversal")
+            analysis.append("- **Confirmation:** Look for retail capitulation")
+        else:
+            analysis.append("- Monitor MyFxBook for extreme retail positioning (80%+ in one direction)")
+            analysis.append("- Use as additional confluence with COT data")
+        
+        analysis.append("\n**Trading Against Sentiment Rules:**")
+        analysis.append("1. Identify extreme retail positioning (70-80%+ on MyFxBook)")
+        analysis.append("2. Confirm with COT institutional extreme (70%+ longs/shorts)")
+        analysis.append("3. Wait for price to reach key supply/demand zone")
+        analysis.append("4. Look for reversal candlestick patterns")
+        analysis.append("5. Execute trade in opposite direction of retail crowd")
+        analysis.append("")
     
-    # Determine bias
-    if latest['Long %'] >= 70:
-        bias = "BULLISH"
-    elif latest['Short %'] >= 70:
-        bias = "BEARISH"
-    else:
-        bias = "NEUTRAL"
+    # ==================== SECTION 7: NEWS & FUNDAMENTAL CONTEXT ====================
+    if st.session_state.show_news:
+        analysis.append("### 📰 NEWS & FUNDAMENTAL CONTEXT")
+        analysis.append("**Check MyFxBook News Section for:**")
+        analysis.append("- Central bank decisions (Fed, ECB, BOE, etc.)")
+        analysis.append("- Economic data releases (CPI, NFP, GDP, etc.)")
+        analysis.append("- Geopolitical events")
+        analysis.append("- Market sentiment shifts")
+        analysis.append("\n**Integration with COT Data:**")
+        analysis.append("- Strong COT positioning + major news event = increased volatility")
+        analysis.append("- News can trigger the reversal at extreme COT levels")
+        analysis.append("- Use news as confluence for supply/demand zone trades")
+        analysis.append("")
     
-    analysis.append(f"**Primary Bias:** {bias}")
+    # ==================== SECTION 8: ACTIONABLE TRADING PLAN ====================
+    if st.session_state.show_plan:
+        analysis.append("### 📋 COMPLETE TRADING PLAN")
+        
+        # Determine bias
+        if latest['Long %'] >= 70:
+            bias = "BULLISH (but watch for reversal at supply)"
+        elif latest['Short %'] >= 70:
+            bias = "BEARISH (but watch for reversal at demand)"
+        else:
+            bias = "NEUTRAL - range trading"
+        
+        analysis.append(f"**Primary Bias:** {bias}")
+        
+        analysis.append("\n**✅ ENTRY CONDITIONS (ALL must be met):**")
+        analysis.append("1. **COT Confirmation:** Institutional positioning aligns with bias")
+        analysis.append("2. **Price Action:** Price reaches key supply/demand zone")
+        analysis.append("3. **RSI Confirmation:**")
+        analysis.append("   - For DEMAND zone longs: RSI > 40 (zone likely to hold)")
+        analysis.append("   - For SUPPLY zone shorts: RSI < 60 (zone likely to hold)")
+        analysis.append("4. **MyFxBook Sentiment:** Retail crowd is on opposite side (contrarian)")
+        analysis.append("5. **Candlestick Pattern:** Reversal signal at the zone")
+        
+        analysis.append("\n**🛑 STOP LOSS PLACEMENT:**")
+        if "BULLISH" in bias:
+            analysis.append("- Below the DEMAND ZONE low")
+            analysis.append("- Add 1.5x ATR buffer for volatility")
+        elif "BEARISH" in bias:
+            analysis.append("- Above the SUPPLY ZONE high")
+            analysis.append("- Add 1.5x ATR buffer for volatility")
+        else:
+            analysis.append("- Beyond range boundaries (below demand or above supply)")
+        
+        analysis.append("\n**🎯 TAKE PROFIT TARGETS:**")
+        analysis.append("- **Target 1:** Nearest opposite zone (1:2 risk/reward)")
+        analysis.append("- **Target 2:** Next major supply/demand level")
+        analysis.append("- **Target 3:** Trail stop after 1:1 achieved")
+        
+        analysis.append("\n**⚖️ RISK MANAGEMENT:**")
+        analysis.append("- Maximum risk: 1-2% of account per trade")
+        analysis.append("- Avoid trading 30 minutes before/after major news")
+        analysis.append("- Correlated markets should confirm (e.g., EUR/USD and GBP/USD)")
+        
+        # Final warning for peak levels
+        if peaks['has_peaks']:
+            if (peaks['peak_longs'] and latest['Longs'] >= peaks['peak_longs'] * 0.95) or \
+               (peaks['peak_shorts'] and latest['Shorts'] >= peaks['peak_shorts'] * 0.95):
+                analysis.append("\n⚠️ **⚠️ CRITICAL WARNING: NEAR HISTORICAL EXTREMES! ⚠️**")
+                analysis.append("**Action:** Prepare for swift reversal at nearest supply/demand zone")
+                analysis.append("**Confirmation:** Wait for RSI divergence and MyFxBook retail extreme")
+        
+        analysis.append("")
     
-    analysis.append("\n**Entry Conditions:**")
-    if bias == "BULLISH":
-        analysis.append("1. Wait for pullback to demand zone")
-        analysis.append("2. Look for bullish reversal candlestick")
-        analysis.append("3. Enter on confirmation")
-    elif bias == "BEARISH":
-        analysis.append("1. Wait for rally to supply zone")
-        analysis.append("2. Look for bearish reversal candlestick")
-        analysis.append("3. Enter on confirmation")
-    else:
-        analysis.append("1. Buy at support, sell at resistance")
-        analysis.append("2. Wait for breakout for trend")
-    
-    analysis.append("\n**Stop Loss:**")
-    if bias == "BULLISH":
-        analysis.append("- Below demand zone low")
-    elif bias == "BEARISH":
-        analysis.append("- Above supply zone high")
-    else:
-        analysis.append("- Beyond range boundaries")
-    
-    analysis.append("\n**Take Profit:**")
-    analysis.append("- Target 1: Nearest swing high/low (1:2 R/R)")
-    analysis.append("- Target 2: Next major zone")
-    analysis.append("- Target 3: Trail stop after 1:1")
-    
-    # Final warning for peak levels
-    if peaks['has_peaks']:
-        if (peaks['peak_longs'] and latest['Longs'] >= peaks['peak_longs'] * 0.95) or \
-           (peaks['peak_shorts'] and latest['Shorts'] >= peaks['peak_shorts'] * 0.95):
-            analysis.append("\n⚠️ **CRITICAL WARNING: Near historical extremes!**")
-    
-    analysis.append("\n---")
-    analysis.append(f"*Analysis based on last {len(recent_13)} weeks of data*")
+    analysis.append("---")
+    analysis.append(f"*Analysis based on last {len(recent_13)} weeks of COT data*")
+    analysis.append(f"*Combine with technical analysis on your charts*")
     
     return "\n".join(analysis)
 
@@ -963,6 +1083,21 @@ def check_and_auto_fetch():
             
             if extractor.report_date:
                 report_date = datetime.strptime(extractor.report_date, '%Y-%m-%d')
+                
+                # Check if data already exists
+                data_already_exists = False
+                for group_name, markets in grouped_data.items():
+                    for display_name, data in markets.items():
+                        if display_name in st.session_state.markets_df:
+                            df = st.session_state.markets_df[display_name]
+                            if report_date in df['Date'].values:
+                                data_already_exists = True
+                                break
+                
+                if data_already_exists:
+                    st.info(f"ℹ️ Data for {extractor.report_date} already exists in database")
+                    return
+                
                 st.session_state.last_fetch_date = extractor.report_date
                 st.session_state.last_auto_fetch = today
                 st.session_state.fetch_history.append(extractor.report_date)
@@ -1022,7 +1157,25 @@ st.sidebar.info(f"📊 Total records: {total_records}")
 if st.session_state.last_fetch_date:
     st.sidebar.info(f"📡 Latest: {st.session_state.last_fetch_date}")
 
-# Manual fetch button
+# Analysis Section Toggles
+st.sidebar.divider()
+st.sidebar.header("🔘 Analysis Toggles")
+
+col1, col2 = st.sidebar.columns(2)
+with col1:
+    st.session_state.show_positioning = st.checkbox("🎯 Positioning", value=st.session_state.show_positioning)
+    st.session_state.show_peak = st.checkbox("📈 Peak Volume", value=st.session_state.show_peak)
+    st.session_state.show_comparison = st.checkbox("📊 13-Week Comp", value=st.session_state.show_comparison)
+    st.session_state.show_zones = st.checkbox("🎯 Supply/Demand", value=st.session_state.show_zones)
+
+with col2:
+    st.session_state.show_rsi = st.checkbox("📊 RSI", value=st.session_state.show_rsi)
+    st.session_state.show_myfxbook = st.checkbox("👥 MyFxBook", value=st.session_state.show_myfxbook)
+    st.session_state.show_news = st.checkbox("📰 News", value=st.session_state.show_news)
+    st.session_state.show_plan = st.checkbox("📋 Trading Plan", value=st.session_state.show_plan)
+
+# Manual fetch button with duplicate check
+st.sidebar.divider()
 if st.sidebar.button("🚀 FETCH LATEST CFTC DATA", type="primary", use_container_width=True):
     with st.spinner("📡 Fetching data from CFTC.gov..."):
         extractor = CombinedCFTCExtractor()
@@ -1030,53 +1183,83 @@ if st.sidebar.button("🚀 FETCH LATEST CFTC DATA", type="primary", use_containe
         
         if extractor.report_date:
             report_date = datetime.strptime(extractor.report_date, '%Y-%m-%d')
-            st.session_state.last_fetch_date = extractor.report_date
-            st.session_state.fetch_history.append(extractor.report_date)
             
-            added_count = 0
+            # Check if data already exists
+            data_already_exists = False
             for group_name, markets in grouped_data.items():
                 for display_name, data in markets.items():
-                    if display_name not in st.session_state.markets_df:
-                        switch_markets = ['USD/CAD', 'USD/CHF', 'USD/JPY', 'USD/MXN', 'USD/BRL', 'USD/ZAR']
-                        if display_name in switch_markets:
-                            processed_data = {
-                                'longs': data['shorts'],
-                                'shorts': data['longs'],
-                                'net': -data['net'],
-                                'long_percent': data['short_percent'],
-                                'short_percent': data['long_percent'],
-                                'total': data['total']
-                            }
-                        else:
-                            processed_data = data
-                        
-                        st.session_state.markets_df[display_name] = pd.DataFrame([{
-                            'Date': report_date,
-                            'Longs': processed_data['longs'],
-                            'Shorts': processed_data['shorts'],
-                            'Total': processed_data['total'],
-                            'Long %': processed_data['long_percent'],
-                            'Short %': processed_data['short_percent'],
-                            'Net': processed_data['net']
-                        }])
-                        added_count += 1
-                    else:
+                    if display_name in st.session_state.markets_df:
                         df = st.session_state.markets_df[display_name]
-                        if report_date not in df['Date'].values:
-                            st.session_state.markets_df = add_new_data(
-                                st.session_state.markets_df, display_name, report_date, data
-                            )
-                            added_count += 1
+                        if report_date in df['Date'].values:
+                            data_already_exists = True
+                            break
+                    if data_already_exists:
+                        break
+                if data_already_exists:
+                    break
             
-            save_to_json()
-            st.sidebar.success(f"✅ Added {added_count} new data points")
-            st.rerun()
+            if data_already_exists:
+                st.sidebar.warning(f"⚠️ Data for {extractor.report_date} has already been extracted!")
+            else:
+                st.session_state.last_fetch_date = extractor.report_date
+                st.session_state.fetch_history.append(extractor.report_date)
+                
+                added_count = 0
+                for group_name, markets in grouped_data.items():
+                    for display_name, data in markets.items():
+                        if display_name not in st.session_state.markets_df:
+                            switch_markets = ['USD/CAD', 'USD/CHF', 'USD/JPY', 'USD/MXN', 'USD/BRL', 'USD/ZAR']
+                            if display_name in switch_markets:
+                                processed_data = {
+                                    'longs': data['shorts'],
+                                    'shorts': data['longs'],
+                                    'net': -data['net'],
+                                    'long_percent': data['short_percent'],
+                                    'short_percent': data['long_percent'],
+                                    'total': data['total']
+                                }
+                            else:
+                                processed_data = data
+                            
+                            st.session_state.markets_df[display_name] = pd.DataFrame([{
+                                'Date': report_date,
+                                'Longs': processed_data['longs'],
+                                'Shorts': processed_data['shorts'],
+                                'Total': processed_data['total'],
+                                'Long %': processed_data['long_percent'],
+                                'Short %': processed_data['short_percent'],
+                                'Net': processed_data['net']
+                            }])
+                            added_count += 1
+                        else:
+                            df = st.session_state.markets_df[display_name]
+                            if report_date not in df['Date'].values:
+                                st.session_state.markets_df = add_new_data(
+                                    st.session_state.markets_df, display_name, report_date, data
+                                )
+                                added_count += 1
+                
+                save_to_json()
+                st.sidebar.success(f"✅ Added {added_count} new data points for {extractor.report_date}")
+                st.rerun()
         else:
             st.sidebar.error("❌ Failed to fetch data")
 
+# Edit mode toggle
+st.sidebar.divider()
+if not st.session_state.edit_mode:
+    if st.sidebar.button("✏️ Enable Data Editing Mode", use_container_width=True):
+        st.session_state.edit_mode = True
+        st.rerun()
+else:
+    st.sidebar.warning("⚠️ Editing Mode Active")
+    if st.sidebar.button("❌ Cancel Editing", use_container_width=True):
+        cancel_edit()
+        st.rerun()
+
 # Clear data button
 if st.sidebar.button("🗑️ Clear All Data", use_container_width=True):
-    if st.sidebar.checkbox("Confirm delete?"):
+    if st.sidebar.checkbox("Confirm delete? This cannot be undone"):
         st.session_state.markets_df = {}
         st.session_state.last_fetch_date = None
         st.session_state.extracted_data_count = 0
@@ -1111,6 +1294,54 @@ for group, markets in group_markets.items():
             with tabs[idx]:
                 df = st.session_state.markets_df[market].copy()
                 
+                # Check if we're editing this market
+                if st.session_state.edit_mode and st.session_state.current_editing_market == market:
+                    st.subheader("✏️ EDITING DATA")
+                    st.caption("Edit the values below. Changes will auto-save.")
+                    
+                    # Create editable dataframe
+                    edit_df = df.copy()
+                    edit_df['Date'] = edit_df['Date'].dt.strftime('%Y-%m-%d')
+                    
+                    # Use data_editor for inline editing
+                    edited_df = st.data_editor(
+                        edit_df[['Date', 'Longs', 'Shorts']],
+                        use_container_width=True,
+                        num_rows="fixed",
+                        key=f"editor_{market}"
+                    )
+                    
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        if st.button("💾 Save Changes", key=f"save_{market}"):
+                            # Convert back to datetime
+                            edited_df['Date'] = pd.to_datetime(edited_df['Date'])
+                            edited_df['Total'] = edited_df['Longs'] + edited_df['Shorts']
+                            edited_df['Net'] = edited_df['Longs'] - edited_df['Shorts']
+                            edited_df['Long %'] = (edited_df['Longs'] / edited_df['Total'] * 100).round(1)
+                            edited_df['Short %'] = (edited_df['Shorts'] / edited_df['Total'] * 100).round(1)
+                            
+                            # Sort by date
+                            edited_df = edited_df.sort_values('Date', ascending=True).reset_index(drop=True)
+                            
+                            st.session_state.markets_df[market] = edited_df
+                            save_to_json()
+                            st.session_state.edit_mode = False
+                            st.session_state.current_editing_market = None
+                            st.success(f"✅ Data saved for {market}")
+                            st.rerun()
+                    
+                    with col2:
+                        if st.button("❌ Cancel", key=f"cancel_{market}"):
+                            cancel_edit()
+                            st.rerun()
+                    
+                    with col3:
+                        st.button("➕ Add New Row", key=f"add_{market}", disabled=True, 
+                                 help="Add new row feature coming soon")
+                    
+                    st.divider()
+                
                 # Show 13 weeks (most recent at top)
                 display_df = df.sort_values('Date', ascending=False).head(13).copy()
                 total_weeks = len(df)
@@ -1140,7 +1371,13 @@ for group, markets in group_markets.items():
                 
                 # Switch info
                 if market in ['USD/CAD', 'USD/CHF', 'USD/JPY', 'USD/MXN', 'USD/BRL', 'USD/ZAR']:
-                    st.caption("🔄 **SWITCHED**: Longs/Shorts swapped")
+                    st.caption("🔄 **SWITCHED**: Longs/Shorts swapped for USD-based pair")
+                
+                # Edit button for this market
+                if st.session_state.edit_mode and st.session_state.current_editing_market is None:
+                    if st.button(f"✏️ Edit {market}", key=f"edit_btn_{market}"):
+                        st.session_state.current_editing_market = market
+                        st.rerun()
                 
                 # Display table
                 st.subheader("📅 Last 13 Weeks (Most Recent at Top)")
@@ -1216,3 +1453,7 @@ st.caption("✅ **PEAK VOLUME VALUES**: Hardcoded from your Excel files")
 st.caption("✅ **SWITCH LOGIC**: Applied to USD/CAD, USD/CHF, USD/JPY, USD/MXN, USD/BRL, USD/ZAR")
 st.caption("✅ **13 WEEKS DISPLAY**: Most recent at top")
 st.caption("✅ **AUTO-FETCH**: Runs automatically on Fridays")
+st.caption("✅ **DUPLICATE CHECK**: Won't fetch same data twice")
+st.caption("✅ **EDIT MODE**: Manually add/edit missing data")
+st.caption("✅ **TOGGLE SECTIONS**: Each analysis section can be hidden/shown")
+st.caption("✅ **BIAS SHIFT ALERTS**: Warns when positioning shifts >15% from 13-week average")
