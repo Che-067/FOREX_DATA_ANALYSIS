@@ -230,7 +230,7 @@ PEAK_VOLUME_VALUES = {
 # -------------------------------
 # DATA PERSISTENCE FUNCTIONS
 # -------------------------------
-
+"""
 def save_to_json():
     """Save all market data to JSON for permanent storage"""
     data_to_save = {}
@@ -247,7 +247,7 @@ def save_to_json():
     
     with open(JSON_STORE_PATH, 'w') as f:
         json.dump(data_to_save, f, indent=2)
-    
+    """
     # Save to Excel (primary)
     with pd.ExcelWriter(EXCEL_STORE_PATH, engine='openpyxl') as writer:
         for market, df in st.session_state.markets_df.items():
@@ -1457,5 +1457,6 @@ st.caption("✅ **DUPLICATE CHECK**: Won't fetch same data twice")
 st.caption("✅ **EDIT MODE**: Manually add/edit missing data")
 st.caption("✅ **TOGGLE SECTIONS**: Each analysis section can be hidden/shown")
 st.caption("✅ **BIAS SHIFT ALERTS**: Warns when positioning shifts >15% from 13-week average")
+
 
 
