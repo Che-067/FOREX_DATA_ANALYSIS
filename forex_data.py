@@ -10,7 +10,10 @@ from io import BytesIO
 import zipfile
 import io as io_module
 from pathlib import Path
-
+import pickle
+import tempfile
+import hashlib
+from datetime import datetime, timedelta
 # -------------------------------
 # PAGE CONFIG
 # -------------------------------
@@ -27,7 +30,16 @@ DATA_DIR.mkdir(exist_ok=True)
 EXCEL_STORE_PATH = DATA_DIR / "cot_master_store.xlsx"
 JSON_STORE_PATH = DATA_DIR / "cot_historical_data.json"
 BACKUP_EXCEL_PATH = DATA_DIR / "cot_backup_data.xlsx"
+# PERSISTENT STORAGE LOCATIONS - Add these!
+TEMP_STORE_PATH = Path(tempfile.gettempdir()) / "cftc_data_store"
+TEMP_STORE_PATH.mkdir(exist_ok=True)
 
+TEMP_JSON_PATH = TEMP_STORE_PATH / "cot_historical_data.json"
+TEMP_PICKLE_PATH = TEMP_STORE_PATH / "cot_data.pkl"
+
+# Session ID for tracking instances
+if 'instance_id' not in st.session_state:
+    st.session_state.instance_id = hashlib.md5(str(datetime.now()).encode()).hexdigest()[:8]
 def init_session_state():
     """Initialize all session state variables"""
     if 'markets_df' not in st.session_state:
@@ -232,6 +244,114 @@ PEAK_VOLUME_VALUES = {
 # -------------------------------
 
 def save_to_json():
+    """Save all market data to MULTIPLE text-based formats (NO EXCEL NEEDED)"""
+    data_to_save = {}
+    for market, df in st.session_state.markets_df.items():
+        data_to_save[market] = {
+            'Date': df['Date'].dt.strftime('%Y-%m-%d').tolist(),
+            'Longs': df['Longs'].tolist(),
+            'Shorts': df['Shorts'].tolist(),
+            'Total': df['Total'].tolist(),
+            'Long %': df['Long %'].tolist(),
+            'Short %': df['Short %'].tolist(),
+            'Net': df['Net'].tolist()
+        }
+    
+    # ===== FORMAT 1: JSON (Primary storage) =====
+    with open(JSON_STORE_PATH, 'w') as f:
+        json.dump(data_to_save, f, indent=2)
+    
+    # ===== FORMAT 2: Compressed JSON (smaller size) =====
+    import gzip
+    with gzip.open(JSON_STORE_PATH.with_suffix('.json.gz'), 'wt') as f:
+        json.dump(data_to_save, f)
+    
+    # ===== FORMAT 3: CSV files (one per market) =====
+    csv_dir = DATA_DIR / "csv_backup"
+    csv_dir.mkdir(exist_ok=True)
+    
+    for market, df in st.session_state.markets_df.items():
+        csv_path = csv_dir / f"{market.replace('/', '_')}.csv"
+        df.to_csv(csv_path, index=False)
+    
+    # ===== FORMAT 4: Single combined CSV =====
+    all_data = []
+    for market, df in st.session_state.markets_df.items():
+        temp_df = df.copy()
+        temp_df['Market'] = market
+        all_data.append(temp_df)
+    
+    if all_data:
+        combined_df = pd.concat(all_data, ignore_index=True)
+        combined_df.to_csv(DATA_DIR / "all_markets_combined.csv", index=False)
+    
+    # ===== FORMAT 5: Text summary =====
+    with open(DATA_DIR / "summary.txt", 'w') as f:
+        f.write(f"CFTC COT Data Summary\n")
+        f.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"Markets: {len(st.session_state.markets_df)}\n")
+        f.write("="*50 + "\n\n")
+        
+        for market, df in st.session_state.markets_df.items():
+            f.write(f"\n{market}:\n")
+            f.write(f"  Records: {len(df)}\n")
+            f.write(f"  Latest: {df['Date'].max().strftime('%Y-%m-%d')}\n")
+            f.write(f"  Oldest: {df['Date'].min().strftime('%Y-%m-%d')}\n")
+
+   def load_from_json():
+    """Load market data from JSON (primary source)"""
+    
+    # Try multiple formats in order of preference
+    load_paths = [
+        JSON_STORE_PATH,  # Regular JSON
+        JSON_STORE_PATH.with_suffix('.json.gz'),  # Compressed JSON
+        DATA_DIR / "all_markets_combined.csv",  # Combined CSV
+    ]
+    
+    for path in load_paths:
+        try:
+            if path.suffix == '.csv':
+                # Load from CSV
+                df = pd.read_csv(path)
+                # Convert back to market-specific dataframes
+                markets_df = {}
+                for market in df['Market'].unique():
+                    market_df = df[df['Market'] == market].drop('Market', axis=1)
+                    market_df['Date'] = pd.to_datetime(market_df['Date'])
+                    markets_df[market] = market_df
+                return markets_df
+                
+            elif path.suffix == '.gz':
+                # Load compressed JSON
+                import gzip
+                with gzip.open(path, 'rt') as f:
+                    data = json.load(f)
+            else:
+                # Load regular JSON
+                with open(path, 'r') as f:
+                    data = json.load(f)
+            
+            # Convert JSON to dataframes
+            if isinstance(data, dict):
+                markets_df = {}
+                for market, market_data in data.items():
+                    df = pd.DataFrame({
+                        'Date': pd.to_datetime(market_data['Date']),
+                        'Longs': market_data['Longs'],
+                        'Shorts': market_data['Shorts'],
+                        'Total': market_data['Total'],
+                        'Long %': market_data['Long %'],
+                        'Short %': market_data['Short %'],
+                        'Net': market_data['Net']
+                    })
+                    markets_df[market] = df
+                return markets_df
+                
+        except Exception as e:
+            continue
+    
+    return None         
+            """
     """Save all market data to JSON for permanent storage"""
     data_to_save = {}
     for market, df in st.session_state.markets_df.items():
@@ -247,7 +367,7 @@ def save_to_json():
     
     with open(JSON_STORE_PATH, 'w') as f:
         json.dump(data_to_save, f, indent=2)
-    """
+    
     # Save to Excel (primary)
     with pd.ExcelWriter(EXCEL_STORE_PATH, engine='openpyxl') as writer:
         for market, df in st.session_state.markets_df.items():
@@ -261,7 +381,11 @@ def save_to_json():
         for market, df in st.session_state.markets_df.items():
             sheet_name = market.replace('/', '_').replace(' ', '_')[:31]
             df.to_excel(writer, sheet_name=sheet_name, index=False)
-"""
+
+
+
+
+    
 def load_from_json():
     """Load market data from JSON if it exists"""
     if JSON_STORE_PATH.exists():
@@ -285,7 +409,7 @@ def load_from_json():
         except:
             return None
     return None
-
+"""
 # -------------------------------
 # HISTORICAL DATA ARRAYS - 16+ WEEKS FROM YOUR EXCEL FILES
 # -------------------------------
@@ -1457,6 +1581,7 @@ st.caption("✅ **DUPLICATE CHECK**: Won't fetch same data twice")
 st.caption("✅ **EDIT MODE**: Manually add/edit missing data")
 st.caption("✅ **TOGGLE SECTIONS**: Each analysis section can be hidden/shown")
 st.caption("✅ **BIAS SHIFT ALERTS**: Warns when positioning shifts >15% from 13-week average")
+
 
 
 
