@@ -13,7 +13,8 @@ from pathlib import Path
 import pickle
 import tempfile
 import hashlib
-from datetime import datetime, timedelta
+import gzip
+
 # -------------------------------
 # PAGE CONFIG
 # -------------------------------
@@ -30,7 +31,8 @@ DATA_DIR.mkdir(exist_ok=True)
 EXCEL_STORE_PATH = DATA_DIR / "cot_master_store.xlsx"
 JSON_STORE_PATH = DATA_DIR / "cot_historical_data.json"
 BACKUP_EXCEL_PATH = DATA_DIR / "cot_backup_data.xlsx"
-# PERSISTENT STORAGE LOCATIONS - Add these!
+
+# PERSISTENT STORAGE LOCATIONS
 TEMP_STORE_PATH = Path(tempfile.gettempdir()) / "cftc_data_store"
 TEMP_STORE_PATH.mkdir(exist_ok=True)
 
@@ -40,6 +42,7 @@ TEMP_PICKLE_PATH = TEMP_STORE_PATH / "cot_data.pkl"
 # Session ID for tracking instances
 if 'instance_id' not in st.session_state:
     st.session_state.instance_id = hashlib.md5(str(datetime.now()).encode()).hexdigest()[:8]
+
 def init_session_state():
     """Initialize all session state variables"""
     if 'markets_df' not in st.session_state:
@@ -56,6 +59,8 @@ def init_session_state():
         st.session_state.editable_df = None
     if 'current_editing_market' not in st.session_state:
         st.session_state.current_editing_market = None
+    if 'edit_submode' not in st.session_state:
+        st.session_state.edit_submode = None
     # Toggle states for analysis sections
     if 'show_positioning' not in st.session_state:
         st.session_state.show_positioning = False
@@ -117,41 +122,11 @@ PEAK_VOLUME_VALUES = {
         'min_shorts': 0,
         'has_peaks': True
     },
-    'USD/ZAR': {
-        'peak_longs': None,
-        'peak_shorts': None,
-        'min_longs': None,
-        'min_shorts': None,
-        'has_peaks': False
-    },
-    'USD/MXN': {
-        'peak_longs': None,
-        'peak_shorts': None,
-        'min_longs': None,
-        'min_shorts': None,
-        'has_peaks': False
-    },
-    'NZD/USD': {
-        'peak_longs': None,
-        'peak_shorts': None,
-        'min_longs': None,
-        'min_shorts': None,
-        'has_peaks': False
-    },
-    'USD/BRL': {
-        'peak_longs': None,
-        'peak_shorts': None,
-        'min_longs': None,
-        'min_shorts': None,
-        'has_peaks': False
-    },
-    'USD/CHF': {
-        'peak_longs': None,
-        'peak_shorts': None,
-        'min_longs': None,
-        'min_shorts': None,
-        'has_peaks': False
-    },
+    'USD/ZAR': {'has_peaks': False},
+    'USD/MXN': {'has_peaks': False},
+    'NZD/USD': {'has_peaks': False},
+    'USD/BRL': {'has_peaks': False},
+    'USD/CHF': {'has_peaks': False},
     
     # ===== METALS =====
     'XAU/USD': {
@@ -168,75 +143,21 @@ PEAK_VOLUME_VALUES = {
         'min_shorts': 16172,
         'has_peaks': True
     },
-    'COPPER/USD': {
-        'peak_longs': None,
-        'peak_shorts': None,
-        'min_longs': None,
-        'min_shorts': None,
-        'has_peaks': False
-    },
-    'STEEL-HRC/USD': {
-        'peak_longs': None,
-        'peak_shorts': None,
-        'min_longs': None,
-        'min_shorts': None,
-        'has_peaks': False
-    },
-    'LITHIUM/USD': {
-        'peak_longs': None,
-        'peak_shorts': None,
-        'min_longs': None,
-        'min_shorts': None,
-        'has_peaks': False
-    },
+    'COPPER/USD': {'has_peaks': False},
+    'STEEL-HRC/USD': {'has_peaks': False},
+    'LITHIUM/USD': {'has_peaks': False},
     
     # ===== ENERGIES =====
-    'CRUDE OIL/USD': {
-        'peak_longs': None,
-        'peak_shorts': None,
-        'min_longs': None,
-        'min_shorts': None,
-        'has_peaks': False
-    },
-    'NAT GAS/USD': {
-        'peak_longs': None,
-        'peak_shorts': None,
-        'min_longs': None,
-        'min_shorts': None,
-        'has_peaks': False
-    },
+    'CRUDE OIL/USD': {'has_peaks': False},
+    'NAT GAS/USD': {'has_peaks': False},
     
     # ===== AGRICULTURE =====
-    'COFFEE/USD': {
-        'peak_longs': None,
-        'peak_shorts': None,
-        'min_longs': None,
-        'min_shorts': None,
-        'has_peaks': False
-    },
-    'WHEAT SRW/USD': {
-        'peak_longs': None,
-        'peak_shorts': None,
-        'min_longs': None,
-        'min_shorts': None,
-        'has_peaks': False
-    },
-    'WHEAT HRW/USD': {
-        'peak_longs': None,
-        'peak_shorts': None,
-        'min_longs': None,
-        'min_shorts': None,
-        'has_peaks': False
-    },
+    'COFFEE/USD': {'has_peaks': False},
+    'WHEAT SRW/USD': {'has_peaks': False},
+    'WHEAT HRW/USD': {'has_peaks': False},
     
     # ===== CRYPTO =====
-    'MICRO-BTC/USD': {
-        'peak_longs': None,
-        'peak_shorts': None,
-        'min_longs': None,
-        'min_shorts': None,
-        'has_peaks': False
-    }
+    'MICRO-BTC/USD': {'has_peaks': False}
 }
 
 # ============================================
@@ -244,22 +165,16 @@ PEAK_VOLUME_VALUES = {
 # ============================================
 
 def add_new_row(market, new_date, new_longs, new_shorts):
-    """
-    Add a new row of data to a specific market
-    Returns (success, message)
-    """
+    """Add a new row of data to a specific market"""
     try:
-        # Validate inputs
         if market not in st.session_state.markets_df:
             return False, f"Market {market} not found"
         
-        # Convert date
         try:
             date_obj = pd.to_datetime(new_date)
         except:
             return False, "Invalid date format. Use YYYY-MM-DD"
         
-        # Validate numbers
         try:
             longs = float(new_longs)
             shorts = float(new_shorts)
@@ -268,12 +183,10 @@ def add_new_row(market, new_date, new_longs, new_shorts):
         except:
             return False, "Longs and Shorts must be valid numbers"
         
-        # Check for duplicate date
         df = st.session_state.markets_df[market]
         if date_obj in df['Date'].values:
             return False, f"Data for {new_date} already exists. Use edit instead."
         
-        # Calculate derived values
         total = longs + shorts
         if total > 0:
             long_pct = (longs / total * 100)
@@ -283,7 +196,6 @@ def add_new_row(market, new_date, new_longs, new_shorts):
             short_pct = 0
         net = longs - shorts
         
-        # Create new row
         new_row = pd.DataFrame([{
             'Date': date_obj,
             'Longs': longs,
@@ -294,14 +206,10 @@ def add_new_row(market, new_date, new_longs, new_shorts):
             'Net': net
         }])
         
-        # Add to dataframe
         updated_df = pd.concat([df, new_row], ignore_index=True)
         updated_df = updated_df.sort_values('Date', ascending=True).reset_index(drop=True)
         
-        # Update session state
         st.session_state.markets_df[market] = updated_df
-        
-        # Auto-save
         save_to_json()
         
         return True, f"✅ Added data for {new_date}"
@@ -310,10 +218,7 @@ def add_new_row(market, new_date, new_longs, new_shorts):
         return False, f"Error adding row: {str(e)}"
 
 def edit_row(market, row_index, new_longs, new_shorts):
-    """
-    Edit an existing row of data
-    Returns (success, message)
-    """
+    """Edit an existing row of data"""
     try:
         if market not in st.session_state.markets_df:
             return False, f"Market {market} not found"
@@ -323,7 +228,6 @@ def edit_row(market, row_index, new_longs, new_shorts):
         if row_index < 0 or row_index >= len(df):
             return False, f"Row index {row_index} out of range"
         
-        # Validate numbers
         try:
             longs = float(new_longs)
             shorts = float(new_shorts)
@@ -332,11 +236,9 @@ def edit_row(market, row_index, new_longs, new_shorts):
         except:
             return False, "Longs and Shorts must be valid numbers"
         
-        # Update values
         df.loc[row_index, 'Longs'] = longs
         df.loc[row_index, 'Shorts'] = shorts
         
-        # Recalculate derived columns
         total = longs + shorts
         df.loc[row_index, 'Total'] = total
         if total > 0:
@@ -347,10 +249,7 @@ def edit_row(market, row_index, new_longs, new_shorts):
             df.loc[row_index, 'Short %'] = 0
         df.loc[row_index, 'Net'] = longs - shorts
         
-        # Update session state
         st.session_state.markets_df[market] = df
-        
-        # Auto-save
         save_to_json()
         
         return True, f"✅ Updated row {row_index + 1}"
@@ -359,10 +258,7 @@ def edit_row(market, row_index, new_longs, new_shorts):
         return False, f"Error editing row: {str(e)}"
 
 def delete_row(market, row_index):
-    """
-    Delete a row from a market
-    Returns (success, message)
-    """
+    """Delete a row from a market"""
     try:
         if market not in st.session_state.markets_df:
             return False, f"Market {market} not found"
@@ -372,16 +268,10 @@ def delete_row(market, row_index):
         if row_index < 0 or row_index >= len(df):
             return False, f"Row index {row_index} out of range"
         
-        # Get date for message
         deleted_date = df.iloc[row_index]['Date'].strftime('%Y-%m-%d')
-        
-        # Delete row
         updated_df = df.drop(df.index[row_index]).reset_index(drop=True)
         
-        # Update session state
         st.session_state.markets_df[market] = updated_df
-        
-        # Auto-save
         save_to_json()
         
         return True, f"✅ Deleted data for {deleted_date}"
@@ -390,9 +280,7 @@ def delete_row(market, row_index):
         return False, f"Error deleting row: {str(e)}"
 
 def insert_missing_week(market, target_date):
-    """
-    Intelligently insert a missing week by interpolating between adjacent weeks
-    """
+    """Intelligently insert a missing week by interpolating between adjacent weeks"""
     try:
         if market not in st.session_state.markets_df:
             return False, f"Market {market} not found"
@@ -400,15 +288,12 @@ def insert_missing_week(market, target_date):
         df = st.session_state.markets_df[market]
         date_obj = pd.to_datetime(target_date)
         
-        # Check if date already exists
         if date_obj in df['Date'].values:
             return False, f"Data for {target_date} already exists"
         
-        # Find surrounding dates
         all_dates = df['Date'].tolist()
         all_dates.sort()
         
-        # Find closest dates before and after
         before_date = None
         after_date = None
         
@@ -421,28 +306,23 @@ def insert_missing_week(market, target_date):
         if before_date is None or after_date is None:
             return False, "Need data before AND after the missing week to interpolate"
         
-        # Get data for surrounding weeks
         before_row = df[df['Date'] == before_date].iloc[0]
         after_row = df[df['Date'] == after_date].iloc[0]
         
-        # Calculate days difference for interpolation
         total_days = (after_date - before_date).days
         days_from_before = (date_obj - before_date).days
         weight = days_from_before / total_days if total_days > 0 else 0.5
         
-        # Interpolate values
         interpolated_longs = before_row['Longs'] + weight * (after_row['Longs'] - before_row['Longs'])
         interpolated_shorts = before_row['Shorts'] + weight * (after_row['Shorts'] - before_row['Shorts'])
         
-        # Round to integers
         longs = round(interpolated_longs)
         shorts = round(interpolated_shorts)
         
-        # Add the interpolated row
         success, message = add_new_row(market, target_date, longs, shorts)
         
         if success:
-            return True, f"✅ Inserted interpolated data for {target_date} (based on {before_date.strftime('%Y-%m-%d')} and {after_date.strftime('%Y-%m-%d')})"
+            return True, f"✅ Inserted interpolated data for {target_date}"
         else:
             return False, message
             
@@ -450,14 +330,11 @@ def insert_missing_week(market, target_date):
         return False, f"Error interpolating week: {str(e)}"
 
 def bulk_edit_mode(market):
-    """
-    Display bulk editing interface for a market
-    """
+    """Display bulk editing interface for a market"""
     st.subheader(f"✏️ BULK EDIT: {market}")
     
     df = st.session_state.markets_df[market].copy()
     
-    # Display current data
     st.write("Current Data (showing last 20 rows):")
     display_df = df.tail(20).copy()
     display_df['Date'] = display_df['Date'].dt.strftime('%Y-%m-%d')
@@ -479,19 +356,15 @@ def bulk_edit_mode(market):
     with col1:
         if st.button("💾 Save All Changes", key=f"bulk_save_{market}"):
             try:
-                # Convert back to proper format
                 edited_df['Date'] = pd.to_datetime(edited_df['Date'])
                 
-                # Merge with full dataset
                 full_df = df.copy()
                 for _, row in edited_df.iterrows():
                     mask = full_df['Date'] == row['Date']
                     if mask.any():
-                        # Update existing
                         full_df.loc[mask, 'Longs'] = row['Longs']
                         full_df.loc[mask, 'Shorts'] = row['Shorts']
                     else:
-                        # Add new
                         total = row['Longs'] + row['Shorts']
                         new_row = pd.DataFrame([{
                             'Date': row['Date'],
@@ -515,7 +388,6 @@ def bulk_edit_mode(market):
     
     with col2:
         if st.button("➕ Add Empty Row", key=f"add_empty_{market}"):
-            # Add a blank row with today's date
             today = datetime.now().strftime('%Y-%m-%d')
             success, msg = add_new_row(market, today, 0, 0)
             if success:
@@ -534,7 +406,7 @@ def bulk_edit_mode(market):
 # -------------------------------
 
 def save_to_json():
-    """Save all market data to MULTIPLE text-based formats (NO EXCEL NEEDED)"""
+    """Save all market data to JSON format"""
     data_to_save = {}
     for market, df in st.session_state.markets_df.items():
         data_to_save[market] = {
@@ -547,121 +419,49 @@ def save_to_json():
             'Net': df['Net'].tolist()
         }
     
-    # ===== FORMAT 1: JSON (Primary storage) =====
     with open(JSON_STORE_PATH, 'w') as f:
         json.dump(data_to_save, f, indent=2)
-    
-    # ===== FORMAT 2: Compressed JSON (smaller size) =====
-    import gzip
-    with gzip.open(JSON_STORE_PATH.with_suffix('.json.gz'), 'wt') as f:
-        json.dump(data_to_save, f)
-    
-    # ===== FORMAT 3: CSV files (one per market) =====
-    csv_dir = DATA_DIR / "csv_backup"
-    csv_dir.mkdir(exist_ok=True)
-    
-    for market, df in st.session_state.markets_df.items():
-        csv_path = csv_dir / f"{market.replace('/', '_')}.csv"
-        df.to_csv(csv_path, index=False)
-    
-    # ===== FORMAT 4: Single combined CSV =====
-    all_data = []
-    for market, df in st.session_state.markets_df.items():
-        temp_df = df.copy()
-        temp_df['Market'] = market
-        all_data.append(temp_df)
-    
-    if all_data:
-        combined_df = pd.concat(all_data, ignore_index=True)
-        combined_df.to_csv(DATA_DIR / "all_markets_combined.csv", index=False)
-    
-    # ===== FORMAT 5: Text summary =====
-    with open(DATA_DIR / "summary.txt", 'w') as f:
-        f.write(f"CFTC COT Data Summary\n")
-        f.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-        f.write(f"Markets: {len(st.session_state.markets_df)}\n")
-        f.write("="*50 + "\n\n")
-        
-        for market, df in st.session_state.markets_df.items():
-            f.write(f"\n{market}:\n")
-            f.write(f"  Records: {len(df)}\n")
-            f.write(f"  Latest: {df['Date'].max().strftime('%Y-%m-%d')}\n")
-            f.write(f"  Oldest: {df['Date'].min().strftime('%Y-%m-%d')}\n")
 
 def load_from_json():
-    """Load market data from JSON (primary source)"""
-    
-    # Try multiple formats in order of preference
-    load_paths = [
-        JSON_STORE_PATH,  # Regular JSON
-        JSON_STORE_PATH.with_suffix('.json.gz'),  # Compressed JSON
-        DATA_DIR / "all_markets_combined.csv",  # Combined CSV
-    ]
-    
-    for path in load_paths:
+    """Load market data from JSON if it exists"""
+    if JSON_STORE_PATH.exists():
         try:
-            if path.suffix == '.csv':
-                # Load from CSV
-                df = pd.read_csv(path)
-                # Convert back to market-specific dataframes
-                markets_df = {}
-                for market in df['Market'].unique():
-                    market_df = df[df['Market'] == market].drop('Market', axis=1)
-                    market_df['Date'] = pd.to_datetime(market_df['Date'])
-                    markets_df[market] = market_df
-                return markets_df
-                
-            elif path.suffix == '.gz':
-                # Load compressed JSON
-                import gzip
-                with gzip.open(path, 'rt') as f:
-                    data = json.load(f)
-            else:
-                # Load regular JSON
-                with open(path, 'r') as f:
-                    data = json.load(f)
+            with open(JSON_STORE_PATH, 'r') as f:
+                data = json.load(f)
             
-            # Convert JSON to dataframes
-            if isinstance(data, dict):
-                markets_df = {}
-                for market, market_data in data.items():
-                    if market.startswith('_'):  # Skip metadata
-                        continue
-                    df = pd.DataFrame({
-                        'Date': pd.to_datetime(market_data['Date']),
-                        'Longs': market_data['Longs'],
-                        'Shorts': market_data['Shorts'],
-                        'Total': market_data['Total'],
-                        'Long %': market_data['Long %'],
-                        'Short %': market_data['Short %'],
-                        'Net': market_data['Net']
-                    })
-                    markets_df[market] = df
-                return markets_df
-                
+            markets_df = {}
+            for market, market_data in data.items():
+                if market.startswith('_'):
+                    continue
+                df = pd.DataFrame({
+                    'Date': pd.to_datetime(market_data['Date']),
+                    'Longs': market_data['Longs'],
+                    'Shorts': market_data['Shorts'],
+                    'Total': market_data['Total'],
+                    'Long %': market_data['Long %'],
+                    'Short %': market_data['Short %'],
+                    'Net': market_data['Net']
+                })
+                markets_df[market] = df
+            return markets_df
         except Exception as e:
-            continue
-    
+            return None
     return None
-
-# -------------------------------
-# DATA EDITING FUNCTIONS
-# -------------------------------
 
 def save_edited_data(market, edited_df):
     """Save edited data back to session state"""
     st.session_state.markets_df[market] = edited_df
-    save_to_json()  # Auto-save after edits
+    save_to_json()
     st.session_state.edit_mode = False
-    st.session_state.editable_df = None
     st.session_state.current_editing_market = None
     st.success(f"✅ Data for {market} updated successfully!")
 
 def cancel_edit():
     """Cancel editing mode"""
     st.session_state.edit_mode = False
-    st.session_state.editable_df = None
     st.session_state.current_editing_market = None
+    st.session_state.edit_submode = None
+
 # -------------------------------
 # HISTORICAL DATA ARRAYS - 16+ WEEKS FROM YOUR EXCEL FILES
 # -------------------------------
@@ -673,7 +473,6 @@ def load_historical_data():
     
     # ============= CURRENCIES - 16+ WEEKS HISTORICAL DATA =============
     
-    # ----- USD/CAD -----
     markets_df['USD/CAD'] = pd.DataFrame({
         'Date': pd.to_datetime([
             '2026-02-03','2026-01-27', '2026-01-20', '2026-01-13', '2026-01-06',
@@ -686,13 +485,11 @@ def load_historical_data():
                  169094, 171852, 173351, 180786],
     })
     
-    # ----- EUR/USD -----
     markets_df['EUR/USD'] = pd.DataFrame({
         'Date': pd.to_datetime([
             '2026-02-03','2026-01-27', '2026-01-20', '2026-01-13', '2026-01-06',
             '2025-12-30', '2025-12-23', '2025-12-16', '2025-12-09',
             '2025-12-02', '2025-11-25', '2025-11-18', '2025-11-11',
-            
         ]),
         'Longs': [302300,290336, 275235, 283592, 298253, 294738, 293179, 277002, 268118,
                  249672, 244392, 243961, 235920],
@@ -700,7 +497,6 @@ def load_historical_data():
                   141219, 150321, 144954, 162331],
     })
     
-    # ----- GBP/USD -----
     markets_df['GBP/USD'] = pd.DataFrame({
         'Date': pd.to_datetime([
             '2026-02-03','2026-01-27', '2026-01-20', '2026-01-13', '2026-01-06',
@@ -713,7 +509,6 @@ def load_historical_data():
                   52252, 45257, 53189, 52423],
     })
     
-    # ----- USD/JPY -----
     markets_df['USD/JPY'] = pd.DataFrame({
         'Date': pd.to_datetime([
             '2026-02-03','2026-01-27', '2026-01-20', '2026-01-13', '2026-01-06',
@@ -726,7 +521,6 @@ def load_historical_data():
                  148540, 142701, 138733, 123873],
     })
     
-    # ----- USD/ZAR -----
     markets_df['USD/ZAR'] = pd.DataFrame({
         'Date': pd.to_datetime([
             '2026-02-03','2026-01-27', '2026-01-20', '2026-01-13', '2026-01-06',
@@ -739,7 +533,6 @@ def load_historical_data():
                  6198, 5395, 6664, 6053],
     })
     
-    # ----- USD/MXN -----
     markets_df['USD/MXN'] = pd.DataFrame({
         'Date': pd.to_datetime([
             '2026-02-03','2026-01-27', '2026-01-20', '2026-01-13', '2026-01-06',
@@ -752,7 +545,6 @@ def load_historical_data():
                  50162, 31364, 36337, 33330],
     })
     
-    # ----- NZD/USD -----
     markets_df['NZD/USD'] = pd.DataFrame({
         'Date': pd.to_datetime([
             '2026-02-03','2026-01-27', '2026-01-20', '2026-01-13', '2026-01-06',
@@ -765,7 +557,6 @@ def load_historical_data():
                   71510, 75548, 73468, 72746],
     })
     
-    # ----- AUD/USD -----
     markets_df['AUD/USD'] = pd.DataFrame({
         'Date': pd.to_datetime([
             '2026-02-03','2026-01-27', '2026-01-20', '2026-01-13', '2026-01-06',
@@ -778,7 +569,6 @@ def load_historical_data():
                   129261, 128094, 121577, 121741],
     })
     
-    # ----- USD/BRL -----
     markets_df['USD/BRL'] = pd.DataFrame({
         'Date': pd.to_datetime([
             '2026-02-03','2026-01-27', '2026-01-20', '2026-01-13', '2026-01-06',
@@ -791,7 +581,6 @@ def load_historical_data():
                  13740, 14493, 20675, 17082],
     })
     
-    # ----- USD/CHF -----
     markets_df['USD/CHF'] = pd.DataFrame({
         'Date': pd.to_datetime([
             '2026-02-03','2026-01-27', '2026-01-20', '2026-01-13', '2026-01-06',
@@ -806,7 +595,6 @@ def load_historical_data():
     
     # ============= METALS - 16+ WEEKS HISTORICAL DATA =============
     
-    # ----- XAU/USD (GOLD) -----
     markets_df['XAU/USD'] = pd.DataFrame({
         'Date': pd.to_datetime([
             '2026-02-03','2026-01-27', '2026-01-20', '2026-01-13', '2026-01-06',
@@ -819,7 +607,6 @@ def load_historical_data():
                   43771, 48678, 59217, 58847],
     })
     
-    # ----- XAG/USD (SILVER) -----
     markets_df['XAG/USD'] = pd.DataFrame({
         'Date': pd.to_datetime([
             '2026-02-03','2026-01-27', '2026-01-20', '2026-01-13', '2026-01-06',
@@ -832,7 +619,6 @@ def load_historical_data():
                   21056, 19814, 20519, 22052],
     })
     
-    # ----- COPPER/USD -----
     markets_df['COPPER/USD'] = pd.DataFrame({
         'Date': pd.to_datetime([
             '2026-02-03','2026-01-27', '2026-01-20', '2026-01-13', '2026-01-06',
@@ -845,7 +631,6 @@ def load_historical_data():
                   67639, 67485, 68749, 73590],
     })
     
-    # ----- STEEL-HRC/USD -----
     markets_df['STEEL-HRC/USD'] = pd.DataFrame({
         'Date': pd.to_datetime([
             '2026-02-03','2026-01-27', '2026-01-20', '2026-01-13', '2026-01-06',
@@ -858,7 +643,6 @@ def load_historical_data():
                   2669, 3400, 2867, 2807],
     })
     
-    # ----- LITHIUM/USD -----
     markets_df['LITHIUM/USD'] = pd.DataFrame({
         'Date': pd.to_datetime([
             '2026-02-03','2026-01-27', '2026-01-20', '2026-01-13', '2026-01-06',
@@ -873,7 +657,6 @@ def load_historical_data():
     
     # ============= ENERGIES - 16+ WEEKS HISTORICAL DATA =============
     
-    # ----- CRUDE OIL/USD -----
     markets_df['CRUDE OIL/USD'] = pd.DataFrame({
         'Date': pd.to_datetime([
             '2026-02-03','2026-01-27', '2026-01-20', '2026-01-13', '2026-01-06',
@@ -886,7 +669,6 @@ def load_historical_data():
                   72858, 80769, 77700, 74886],
     })
     
-    # ----- NAT GAS/USD -----
     markets_df['NAT GAS/USD'] = pd.DataFrame({
         'Date': pd.to_datetime([
             '2026-02-03','2026-01-27', '2026-01-20', '2026-01-13', '2026-01-06',
@@ -894,14 +676,13 @@ def load_historical_data():
             '2025-12-02', '2025-11-25', '2025-11-18', '2025-11-11',
         ]),
         'Longs': [203843, 240024, 273463, 298303, 323975, 320954, 351162, 314412,
-                 296553, 242178, 196658, 190434,189999],
+                 296553, 242178, 196658, 190434, 189999],
         'Shorts': [82032, 82245, 80573, 82198, 78703, 81141, 97072, 86286,
-                  79129, 84985, 119042, 144269,145554],
+                  79129, 84985, 119042, 144269, 145554],
     })
     
     # ============= AGRICULTURE - 16+ WEEKS HISTORICAL DATA =============
     
-    # ----- COFFEE/USD -----
     markets_df['COFFEE/USD'] = pd.DataFrame({
         'Date': pd.to_datetime([
             '2026-02-03','2026-01-27', '2026-01-20', '2026-01-13', '2026-01-06',
@@ -914,7 +695,6 @@ def load_historical_data():
                   25598, 25223, 25007, 26449],
     })
     
-    # ----- WHEAT SRW/USD -----
     markets_df['WHEAT SRW/USD'] = pd.DataFrame({
         'Date': pd.to_datetime([
             '2026-02-03','2026-01-27', '2026-01-20', '2026-01-13', '2026-01-06',
@@ -927,7 +707,6 @@ def load_historical_data():
                   142933, 140928, 139665, 154507, 174981],
     })
     
-    # ----- WHEAT HRW/USD -----
     markets_df['WHEAT HRW/USD'] = pd.DataFrame({
         'Date': pd.to_datetime([
             '2026-02-03','2026-01-27', '2026-01-20', '2026-01-13', '2026-01-06',
@@ -942,7 +721,6 @@ def load_historical_data():
     
     # ============= CRYPTO - 16+ WEEKS HISTORICAL DATA =============
     
-    # ----- MICRO-BTC/USD -----
     markets_df['MICRO-BTC/USD'] = pd.DataFrame({
         'Date': pd.to_datetime([
             '2026-02-03','2026-01-27', '2026-01-20', '2026-01-13', '2026-01-06',
@@ -1079,13 +857,11 @@ class CombinedCFTCExtractor:
             'Crypto': {}
         }
 
-        # Currencies
         for cme_name, user_name in currency_mapping.items():
             if cme_name in self.commodity_data:
                 data = self.commodity_data[cme_name].copy()
                 groups['Currencies'][user_name] = data
 
-        # Metals
         metal_names = {
             'GOLD': 'XAU/USD',
             'SILVER': 'XAG/USD',
@@ -1099,14 +875,12 @@ class CombinedCFTCExtractor:
                     groups['Metals'][display_name] = self.commodity_data[key]
                     break
 
-        # Energies
         for key in self.commodity_data:
             if 'CRUDE OIL' in key.upper():
                 groups['Energies']['CRUDE OIL/USD'] = self.commodity_data[key]
             if 'NATURAL GAS' in key.upper():
                 groups['Energies']['NAT GAS/USD'] = self.commodity_data[key]
 
-        # Agriculture
         for key in self.commodity_data:
             if 'COFFEE' in key.upper():
                 groups['Agriculture']['COFFEE/USD'] = self.commodity_data[key]
@@ -1115,7 +889,6 @@ class CombinedCFTCExtractor:
             if 'WHEAT-HRW' in key.upper():
                 groups['Agriculture']['WHEAT HRW/USD'] = self.commodity_data[key]
 
-        # Crypto
         for key in self.commodity_data:
             if 'MICRO BITCOIN' in key.upper():
                 groups['Crypto']['MICRO-BTC/USD'] = self.commodity_data[key]
@@ -1132,7 +905,6 @@ def add_new_data(markets_df, display_name, new_date, new_data):
     
     switch_markets = ['USD/CAD', 'USD/CHF', 'USD/JPY', 'USD/MXN', 'USD/BRL', 'USD/ZAR']
     
-    # Apply switch logic for USD-based pairs
     if display_name in switch_markets:
         processed_data = {
             'longs': new_data['shorts'],
@@ -1165,98 +937,7 @@ def add_new_data(markets_df, display_name, new_date, new_data):
     markets_df[display_name] = updated_df
     
     return markets_df
-"""
 
-# -------------------------------
-# DATA EDITING FUNCTIONS
-# -------------------------------
-# Edit button for this market
-if st.session_state.edit_mode and st.session_state.current_editing_market is None:
-    col_e1, col_e2, col_e3 = st.columns(3)
-    with col_e1:
-        if st.button(f"✏️ Quick Edit {market}", key=f"quick_edit_{market}"):
-            st.session_state.current_editing_market = market
-            st.session_state.edit_submode = 'quick'
-            st.rerun()
-    with col_e2:
-        if st.button(f"📝 Bulk Edit {market}", key=f"bulk_edit_{market}"):
-            st.session_state.current_editing_market = market
-            st.session_state.edit_submode = 'bulk'
-            st.rerun()
-    with col_e3:
-        if st.button(f"🔍 Insert Missing Week", key=f"insert_{market}"):
-            st.session_state.current_editing_market = market
-            st.session_state.edit_submode = 'insert'
-            st.rerun()
-
-# Handle different edit modes
-if st.session_state.edit_mode and st.session_state.current_editing_market == market:
-    if st.session_state.get('edit_submode') == 'quick':
-        # Your existing quick edit code
-        st.subheader("✏️ QUICK EDIT MODE")
-        # ... (keep your existing quick edit code)
-        
-    elif st.session_state.get('edit_submode') == 'bulk':
-        # New bulk edit mode
-        bulk_edit_mode(market)
-        
-    elif st.session_state.get('edit_submode') == 'insert':
-        # Insert missing week mode
-        st.subheader(f"🔍 INSERT MISSING WEEK - {market}")
-        
-        # Show available dates
-        df = st.session_state.markets_df[market]
-        st.write("Current data range:")
-        st.write(f"From: {df['Date'].min().strftime('%Y-%m-%d')}")
-        st.write(f"To: {df['Date'].max().strftime('%Y-%m-%d')}")
-        
-        # Input for missing date
-        missing_date = st.date_input(
-            "Select date to insert",
-            value=df['Date'].max() + timedelta(days=7),
-            min_value=df['Date'].min() + timedelta(days=7),
-            max_value=df['Date'].max() - timedelta(days=7)
-        )
-        
-        col_i1, col_i2, col_i3 = st.columns(3)
-        with col_i1:
-            if st.button("📊 Auto-Interpolate", key=f"interpolate_{market}"):
-                success, msg = insert_missing_week(market, missing_date.strftime('%Y-%m-%d'))
-                if success:
-                    st.success(msg)
-                    st.session_state.edit_mode = False
-                    st.rerun()
-                else:
-                    st.error(msg)
-        
-        with col_i2:
-            if st.button("➕ Add Manual", key=f"manual_{market}"):
-                # Switch to quick edit with this date pre-filled
-                st.session_state.edit_prefill_date = missing_date
-                st.session_state.edit_submode = 'quick'
-                st.rerun()
-        
-        with col_i3:
-            if st.button("❌ Cancel", key=f"cancel_insert_{market}"):
-                st.session_state.edit_mode = False
-                st.rerun()
-
-"""
-def save_edited_data(market, edited_df):
-    """Save edited data back to session state"""
-    st.session_state.markets_df[market] = edited_df
-    save_to_json()  # Auto-save after edits
-    st.session_state.edit_mode = False
-    st.session_state.editable_df = None
-    st.session_state.current_editing_market = None
-    st.success(f"✅ Data for {market} updated successfully!")
-
-def cancel_edit():
-    """Cancel editing mode"""
-    st.session_state.edit_mode = False
-    st.session_state.editable_df = None
-    st.session_state.current_editing_market = None
-"""
 # -------------------------------
 # ENHANCED MARKET ANALYSIS WITH PEAK VALUES AND TOGGLE SECTIONS
 # -------------------------------
@@ -1271,20 +952,16 @@ def analyze_market_with_peaks(df, market_name):
     avg_shorts = recent_13['Shorts'].mean()
     avg_net = recent_13['Net'].mean()
     
-    # Calculate bias shift indicators
     longs_vs_avg = ((latest['Longs'] - avg_longs) / avg_longs * 100)
     shorts_vs_avg = ((latest['Shorts'] - avg_shorts) / avg_shorts * 100)
     
-    # Get peak values for this market
     peaks = PEAK_VOLUME_VALUES.get(market_name, {'has_peaks': False})
     
     analysis = []
     
-    # ==================== HEADER ====================
     analysis.append(f"## 📊 COMPLETE ANALYSIS: {market_name}")
     analysis.append("---")
     
-    # ==================== BIAS SHIFT WARNING ====================
     if abs(longs_vs_avg) > 15 or abs(shorts_vs_avg) > 15:
         analysis.append("### ⚠️ **BIAS SHIFT DETECTED!**")
         if longs_vs_avg > 15:
@@ -1302,7 +979,6 @@ def analyze_market_with_peaks(df, market_name):
             analysis.append("🎯 **Watch DEMAND ZONES carefully as price approaches**")
         analysis.append("---")
     
-    # ==================== SECTION 1: CURRENT POSITIONING ====================
     if st.session_state.show_positioning:
         analysis.append("### 🎯 CURRENT INSTITUTIONAL POSITIONING")
         analysis.append(f"- **Longs:** {latest['Longs']:,.0f} ({latest['Long %']:.1f}%)")
@@ -1315,12 +991,11 @@ def analyze_market_with_peaks(df, market_name):
             analysis.append("🔥 **EXTREME BEARISH** - 70%+ short concentration")
         analysis.append("")
     
-    # ==================== SECTION 2: PEAK VOLUME ANALYSIS ====================
     if st.session_state.show_peak:
         analysis.append("### 📈 PEAK VOLUME ANALYSIS")
         
         if peaks['has_peaks']:
-            if peaks['peak_longs']:
+            if peaks.get('peak_longs'):
                 longs_pct_of_peak = (latest['Longs'] / peaks['peak_longs'] * 100)
                 analysis.append(f"\n**Longs:** {latest['Longs']:,.0f} vs Peak {peaks['peak_longs']:,.0f} ({longs_pct_of_peak:.1f}%)")
                 
@@ -1333,7 +1008,7 @@ def analyze_market_with_peaks(df, market_name):
                 elif longs_pct_of_peak >= 90:
                     analysis.append("📊 **Near peak levels** - Monitor for exhaustion at supply")
             
-            if peaks['peak_shorts']:
+            if peaks.get('peak_shorts'):
                 shorts_pct_of_peak = (latest['Shorts'] / peaks['peak_shorts'] * 100)
                 analysis.append(f"\n**Shorts:** {latest['Shorts']:,.0f} vs Peak {peaks['peak_shorts']:,.0f} ({shorts_pct_of_peak:.1f}%)")
                 
@@ -1346,16 +1021,15 @@ def analyze_market_with_peaks(df, market_name):
                 elif shorts_pct_of_peak >= 90:
                     analysis.append("📊 **Shorts near peak** - Monitor for covering at demand")
             
-            if peaks['min_longs'] and latest['Longs'] <= peaks['min_longs'] * 1.1:
+            if peaks.get('min_longs') and latest['Longs'] <= peaks['min_longs'] * 1.1:
                 analysis.append(f"\n🟢 **Longs at historic lows** - Potential **DEMAND ZONE** forming")
             
-            if peaks['min_shorts'] and latest['Shorts'] <= peaks['min_shorts'] * 1.1:
+            if peaks.get('min_shorts') and latest['Shorts'] <= peaks['min_shorts'] * 1.1:
                 analysis.append(f"\n🔴 **Shorts at historic lows** - Potential **SUPPLY ZONE** forming")
         else:
             analysis.append("📊 No peak volume data available for this market")
         analysis.append("")
     
-    # ==================== SECTION 3: 13-WEEK COMPARISON ====================
     if st.session_state.show_comparison:
         analysis.append("### 📊 13-WEEK AVERAGE COMPARISON")
         analysis.append(f"- **Longs:** {latest['Longs']:,.0f} vs 13wk avg {avg_longs:,.0f} ({longs_vs_avg:+.1f}%)")
@@ -1368,7 +1042,6 @@ def analyze_market_with_peaks(df, market_name):
             analysis.append(f"{'📉' if shorts_vs_avg > 0 else '📈'} **Significant deviation** in short positioning")
         analysis.append("")
     
-    # ==================== SECTION 4: SUPPLY/DEMAND ZONES ====================
     if st.session_state.show_zones:
         analysis.append("### 🎯 KEY SUPPLY/DEMAND ZONES")
         
@@ -1392,7 +1065,6 @@ def analyze_market_with_peaks(df, market_name):
             analysis.append("- **RSI Confirmation:** RSI < 30 at demand, RSI > 70 at supply")
         analysis.append("")
     
-    # ==================== SECTION 5: RSI CONFIRMATION ====================
     if st.session_state.show_rsi:
         analysis.append("### 📊 RSI CONFIRMATION LEVELS")
         analysis.append("**RSI (Relative Strength Index) Rules:**")
@@ -1403,7 +1075,6 @@ def analyze_market_with_peaks(df, market_name):
         analysis.append("\n*Note: Check your chart for actual RSI values*")
         analysis.append("")
     
-    # ==================== SECTION 6: MYFXBOOK SENTIMENT ====================
     if st.session_state.show_myfxbook:
         analysis.append("### 👥 MYFXBOOK RETAIL SENTIMENT")
         analysis.append("**Contrarian Trading Signals:**")
@@ -1428,7 +1099,6 @@ def analyze_market_with_peaks(df, market_name):
         analysis.append("5. Execute trade in opposite direction of retail crowd")
         analysis.append("")
     
-    # ==================== SECTION 7: NEWS & FUNDAMENTAL CONTEXT ====================
     if st.session_state.show_news:
         analysis.append("### 📰 NEWS & FUNDAMENTAL CONTEXT")
         analysis.append("**Check MyFxBook News Section for:**")
@@ -1442,11 +1112,9 @@ def analyze_market_with_peaks(df, market_name):
         analysis.append("- Use news as confluence for supply/demand zone trades")
         analysis.append("")
     
-    # ==================== SECTION 8: ACTIONABLE TRADING PLAN ====================
     if st.session_state.show_plan:
         analysis.append("### 📋 COMPLETE TRADING PLAN")
         
-        # Determine bias
         if latest['Long %'] >= 70:
             bias = "BULLISH (but watch for reversal at supply)"
         elif latest['Short %'] >= 70:
@@ -1485,10 +1153,9 @@ def analyze_market_with_peaks(df, market_name):
         analysis.append("- Avoid trading 30 minutes before/after major news")
         analysis.append("- Correlated markets should confirm (e.g., EUR/USD and GBP/USD)")
         
-        # Final warning for peak levels
         if peaks['has_peaks']:
-            if (peaks['peak_longs'] and latest['Longs'] >= peaks['peak_longs'] * 0.95) or \
-               (peaks['peak_shorts'] and latest['Shorts'] >= peaks['peak_shorts'] * 0.95):
+            if (peaks.get('peak_longs') and latest['Longs'] >= peaks['peak_longs'] * 0.95) or \
+               (peaks.get('peak_shorts') and latest['Shorts'] >= peaks['peak_shorts'] * 0.95):
                 analysis.append("\n⚠️ **⚠️ CRITICAL WARNING: NEAR HISTORICAL EXTREMES! ⚠️**")
                 analysis.append("**Action:** Prepare for swift reversal at nearest supply/demand zone")
                 analysis.append("**Confirmation:** Wait for RSI divergence and MyFxBook retail extreme")
@@ -1532,7 +1199,6 @@ def check_and_auto_fetch():
             if extractor.report_date:
                 report_date = datetime.strptime(extractor.report_date, '%Y-%m-%d')
                 
-                # Check if data already exists
                 data_already_exists = False
                 for group_name, markets in grouped_data.items():
                     for display_name, data in markets.items():
@@ -1596,7 +1262,6 @@ check_and_auto_fetch()
 
 st.sidebar.header("📁 Data Management")
 
-# Show data stats
 total_markets = len(st.session_state.markets_df)
 total_records = sum(len(df) for df in st.session_state.markets_df.values())
 st.sidebar.success(f"✅ LOADED: {total_markets} markets")
@@ -1605,7 +1270,6 @@ st.sidebar.info(f"📊 Total records: {total_records}")
 if st.session_state.last_fetch_date:
     st.sidebar.info(f"📡 Latest: {st.session_state.last_fetch_date}")
 
-# Analysis Section Toggles
 st.sidebar.divider()
 st.sidebar.header("🔘 Analysis Toggles")
 
@@ -1622,7 +1286,6 @@ with col2:
     st.session_state.show_news = st.checkbox("📰 News", value=st.session_state.show_news)
     st.session_state.show_plan = st.checkbox("📋 Trading Plan", value=st.session_state.show_plan)
 
-# Manual fetch button with duplicate check
 st.sidebar.divider()
 if st.sidebar.button("🚀 FETCH LATEST CFTC DATA", type="primary", use_container_width=True):
     with st.spinner("📡 Fetching data from CFTC.gov..."):
@@ -1632,7 +1295,6 @@ if st.sidebar.button("🚀 FETCH LATEST CFTC DATA", type="primary", use_containe
         if extractor.report_date:
             report_date = datetime.strptime(extractor.report_date, '%Y-%m-%d')
             
-            # Check if data already exists
             data_already_exists = False
             for group_name, markets in grouped_data.items():
                 for display_name, data in markets.items():
@@ -1693,7 +1355,6 @@ if st.sidebar.button("🚀 FETCH LATEST CFTC DATA", type="primary", use_containe
         else:
             st.sidebar.error("❌ Failed to fetch data")
 
-# Edit mode toggle
 st.sidebar.divider()
 if not st.session_state.edit_mode:
     if st.sidebar.button("✏️ Enable Data Editing Mode", use_container_width=True):
@@ -1705,7 +1366,6 @@ else:
         cancel_edit()
         st.rerun()
 
-# Clear data button
 if st.sidebar.button("🗑️ Clear All Data", use_container_width=True):
     if st.sidebar.checkbox("Confirm delete? This cannot be undone"):
         st.session_state.markets_df = {}
@@ -1742,66 +1402,54 @@ for group, markets in group_markets.items():
             with tabs[idx]:
                 df = st.session_state.markets_df[market].copy()
                 
-                # Check if we're editing this market
                 if st.session_state.edit_mode and st.session_state.current_editing_market == market:
-                    st.subheader("✏️ EDITING DATA")
-                    st.caption("Edit the values below. Changes will auto-save.")
-                    
-                    # Create editable dataframe
-                    edit_df = df.copy()
-                    edit_df['Date'] = edit_df['Date'].dt.strftime('%Y-%m-%d')
-                    
-                    # Use data_editor for inline editing
-                    edited_df = st.data_editor(
-                        edit_df[['Date', 'Longs', 'Shorts']],
-                        use_container_width=True,
-                        num_rows="fixed",
-                        key=f"editor_{market}"
-                    )
-                    
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        if st.button("💾 Save Changes", key=f"save_{market}"):
-                            # Convert back to datetime
-                            edited_df['Date'] = pd.to_datetime(edited_df['Date'])
-                            edited_df['Total'] = edited_df['Longs'] + edited_df['Shorts']
-                            edited_df['Net'] = edited_df['Longs'] - edited_df['Shorts']
-                            edited_df['Long %'] = (edited_df['Longs'] / edited_df['Total'] * 100).round(1)
-                            edited_df['Short %'] = (edited_df['Shorts'] / edited_df['Total'] * 100).round(1)
-                            
-                            # Sort by date
-                            edited_df = edited_df.sort_values('Date', ascending=True).reset_index(drop=True)
-                            
-                            st.session_state.markets_df[market] = edited_df
-                            save_to_json()
-                            st.session_state.edit_mode = False
-                            st.session_state.current_editing_market = None
-                            st.success(f"✅ Data saved for {market}")
-                            st.rerun()
-                    
-                    with col2:
-                        if st.button("❌ Cancel", key=f"cancel_{market}"):
-                            cancel_edit()
-                            st.rerun()
-                    
-                    with col3:
-                        st.button("➕ Add New Row", key=f"add_{market}", disabled=True, 
-                                 help="Add new row feature coming soon")
-                    
-                    st.divider()
+                    if st.session_state.get('edit_submode') == 'bulk':
+                        bulk_edit_mode(market)
+                    else:
+                        st.subheader("✏️ QUICK EDIT MODE")
+                        edit_df = df.copy()
+                        edit_df['Date'] = edit_df['Date'].dt.strftime('%Y-%m-%d')
+                        
+                        edited_df = st.data_editor(
+                            edit_df[['Date', 'Longs', 'Shorts']],
+                            use_container_width=True,
+                            num_rows="fixed",
+                            key=f"editor_{market}"
+                        )
+                        
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            if st.button("💾 Save Changes", key=f"save_{market}"):
+                                edited_df['Date'] = pd.to_datetime(edited_df['Date'])
+                                edited_df['Total'] = edited_df['Longs'] + edited_df['Shorts']
+                                edited_df['Net'] = edited_df['Longs'] - edited_df['Shorts']
+                                edited_df['Long %'] = (edited_df['Longs'] / edited_df['Total'] * 100).round(1)
+                                edited_df['Short %'] = (edited_df['Shorts'] / edited_df['Total'] * 100).round(1)
+                                edited_df = edited_df.sort_values('Date', ascending=True).reset_index(drop=True)
+                                
+                                st.session_state.markets_df[market] = edited_df
+                                save_to_json()
+                                st.session_state.edit_mode = False
+                                st.session_state.current_editing_market = None
+                                st.success(f"✅ Data saved for {market}")
+                                st.rerun()
+                        
+                        with col2:
+                            if st.button("❌ Cancel", key=f"cancel_{market}"):
+                                cancel_edit()
+                                st.rerun()
+                        
+                        st.divider()
                 
-                # Show 13 weeks (most recent at top)
                 display_df = df.sort_values('Date', ascending=False).head(13).copy()
                 total_weeks = len(df)
                 
-                # Calculate averages
                 avg_longs = display_df['Longs'].mean()
                 avg_shorts = display_df['Shorts'].mean()
                 avg_net = display_df['Net'].mean()
                 
                 latest = display_df.iloc[0]
                 
-                # Metrics
                 col1, col2, col3, col4, col5 = st.columns(5)
                 with col1:
                     st.metric("Latest Longs", f"{latest['Longs']:,.0f}", 
@@ -1817,17 +1465,27 @@ for group, markets in group_markets.items():
                 with col5:
                     st.metric("Short %", f"{latest['Short %']:.1f}%")
                 
-                # Switch info
                 if market in ['USD/CAD', 'USD/CHF', 'USD/JPY', 'USD/MXN', 'USD/BRL', 'USD/ZAR']:
                     st.caption("🔄 **SWITCHED**: Longs/Shorts swapped for USD-based pair")
                 
-                # Edit button for this market
                 if st.session_state.edit_mode and st.session_state.current_editing_market is None:
-                    if st.button(f"✏️ Edit {market}", key=f"edit_btn_{market}"):
-                        st.session_state.current_editing_market = market
-                        st.rerun()
+                    col_e1, col_e2, col_e3 = st.columns(3)
+                    with col_e1:
+                        if st.button(f"✏️ Quick Edit {market}", key=f"quick_edit_{market}"):
+                            st.session_state.current_editing_market = market
+                            st.session_state.edit_submode = 'quick'
+                            st.rerun()
+                    with col_e2:
+                        if st.button(f"📝 Bulk Edit {market}", key=f"bulk_edit_{market}"):
+                            st.session_state.current_editing_market = market
+                            st.session_state.edit_submode = 'bulk'
+                            st.rerun()
+                    with col_e3:
+                        if st.button(f"🔍 Insert Missing Week", key=f"insert_{market}"):
+                            st.session_state.current_editing_market = market
+                            st.session_state.edit_submode = 'insert'
+                            st.rerun()
                 
-                # Display table
                 st.subheader("📅 Last 13 Weeks (Most Recent at Top)")
                 
                 display_table = display_df.copy()
@@ -1838,7 +1496,6 @@ for group, markets in group_markets.items():
                 display_table['Long %'] = display_table['Long %'].map('{:.1f}%'.format)
                 display_table['Short %'] = display_table['Short %'].map('{:.1f}%'.format)
                 
-                # Highlight latest
                 def highlight_live(row):
                     if st.session_state.last_fetch_date and row['Date'] == st.session_state.last_fetch_date:
                         return ['background-color: #90EE90'] * len(row)
@@ -1849,7 +1506,6 @@ for group, markets in group_markets.items():
                 
                 st.caption(f"📈 Total records: {total_weeks} weeks")
                 
-                # ==================== COMPREHENSIVE ANALYSIS ====================
                 st.subheader("🔍 COMPREHENSIVE MARKET ANALYSIS")
                 analysis_text = analyze_market_with_peaks(df, market)
                 st.markdown(analysis_text)
@@ -1885,7 +1541,6 @@ if st.session_state.markets_df:
             use_container_width=True
         )
     
-    # Fetch history
     if st.session_state.fetch_history:
         st.sidebar.divider()
         st.sidebar.caption("📅 Fetch History:")
@@ -1905,10 +1560,3 @@ st.caption("✅ **DUPLICATE CHECK**: Won't fetch same data twice")
 st.caption("✅ **EDIT MODE**: Manually add/edit missing data")
 st.caption("✅ **TOGGLE SECTIONS**: Each analysis section can be hidden/shown")
 st.caption("✅ **BIAS SHIFT ALERTS**: Warns when positioning shifts >15% from 13-week average")
-
-
-
-
-
-
-
