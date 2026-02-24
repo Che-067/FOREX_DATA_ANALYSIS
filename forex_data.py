@@ -588,7 +588,7 @@ def save_to_json():
             f.write(f"  Latest: {df['Date'].max().strftime('%Y-%m-%d')}\n")
             f.write(f"  Oldest: {df['Date'].min().strftime('%Y-%m-%d')}\n")
 
-   def load_from_json():
+def load_from_json():
     """Load market data from JSON (primary source)"""
     
     # Try multiple formats in order of preference
@@ -625,6 +625,8 @@ def save_to_json():
             if isinstance(data, dict):
                 markets_df = {}
                 for market, market_data in data.items():
+                    if market.startswith('_'):  # Skip metadata
+                        continue
                     df = pd.DataFrame({
                         'Date': pd.to_datetime(market_data['Date']),
                         'Longs': market_data['Longs'],
@@ -640,66 +642,26 @@ def save_to_json():
         except Exception as e:
             continue
     
-    return None         
-            """
-    """Save all market data to JSON for permanent storage"""
-    data_to_save = {}
-    for market, df in st.session_state.markets_df.items():
-        data_to_save[market] = {
-            'Date': df['Date'].dt.strftime('%Y-%m-%d').tolist(),
-            'Longs': df['Longs'].tolist(),
-            'Shorts': df['Shorts'].tolist(),
-            'Total': df['Total'].tolist(),
-            'Long %': df['Long %'].tolist(),
-            'Short %': df['Short %'].tolist(),
-            'Net': df['Net'].tolist()
-        }
-    
-    with open(JSON_STORE_PATH, 'w') as f:
-        json.dump(data_to_save, f, indent=2)
-    
-    # Save to Excel (primary)
-    with pd.ExcelWriter(EXCEL_STORE_PATH, engine='openpyxl') as writer:
-        for market, df in st.session_state.markets_df.items():
-            sheet_name = market.replace('/', '_').replace(' ', '_')[:31]
-            df.to_excel(writer, sheet_name=sheet_name, index=False)
-    
-    # Save backup Excel with timestamp
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    backup_path = DATA_DIR / f"cot_backup_{timestamp}.xlsx"
-    with pd.ExcelWriter(backup_path, engine='openpyxl') as writer:
-        for market, df in st.session_state.markets_df.items():
-            sheet_name = market.replace('/', '_').replace(' ', '_')[:31]
-            df.to_excel(writer, sheet_name=sheet_name, index=False)
-
-
-
-
-    
-def load_from_json():
-    """Load market data from JSON if it exists"""
-    if JSON_STORE_PATH.exists():
-        try:
-            with open(JSON_STORE_PATH, 'r') as f:
-                data = json.load(f)
-            
-            markets_df = {}
-            for market, market_data in data.items():
-                df = pd.DataFrame({
-                    'Date': pd.to_datetime(market_data['Date']),
-                    'Longs': market_data['Longs'],
-                    'Shorts': market_data['Shorts'],
-                    'Total': market_data['Total'],
-                    'Long %': market_data['Long %'],
-                    'Short %': market_data['Short %'],
-                    'Net': market_data['Net']
-                })
-                markets_df[market] = df
-            return markets_df
-        except:
-            return None
     return None
-"""
+
+# -------------------------------
+# DATA EDITING FUNCTIONS
+# -------------------------------
+
+def save_edited_data(market, edited_df):
+    """Save edited data back to session state"""
+    st.session_state.markets_df[market] = edited_df
+    save_to_json()  # Auto-save after edits
+    st.session_state.edit_mode = False
+    st.session_state.editable_df = None
+    st.session_state.current_editing_market = None
+    st.success(f"✅ Data for {market} updated successfully!")
+
+def cancel_edit():
+    """Cancel editing mode"""
+    st.session_state.edit_mode = False
+    st.session_state.editable_df = None
+    st.session_state.current_editing_market = None
 # -------------------------------
 # HISTORICAL DATA ARRAYS - 16+ WEEKS FROM YOUR EXCEL FILES
 # -------------------------------
@@ -1943,6 +1905,7 @@ st.caption("✅ **DUPLICATE CHECK**: Won't fetch same data twice")
 st.caption("✅ **EDIT MODE**: Manually add/edit missing data")
 st.caption("✅ **TOGGLE SECTIONS**: Each analysis section can be hidden/shown")
 st.caption("✅ **BIAS SHIFT ALERTS**: Warns when positioning shifts >15% from 13-week average")
+
 
 
 
