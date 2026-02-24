@@ -239,6 +239,296 @@ PEAK_VOLUME_VALUES = {
     }
 }
 
+# ============================================
+# ENHANCED DATA EDITING & ROW MANAGEMENT
+# ============================================
+
+def add_new_row(market, new_date, new_longs, new_shorts):
+    """
+    Add a new row of data to a specific market
+    Returns (success, message)
+    """
+    try:
+        # Validate inputs
+        if market not in st.session_state.markets_df:
+            return False, f"Market {market} not found"
+        
+        # Convert date
+        try:
+            date_obj = pd.to_datetime(new_date)
+        except:
+            return False, "Invalid date format. Use YYYY-MM-DD"
+        
+        # Validate numbers
+        try:
+            longs = float(new_longs)
+            shorts = float(new_shorts)
+            if longs < 0 or shorts < 0:
+                return False, "Longs and Shorts must be positive numbers"
+        except:
+            return False, "Longs and Shorts must be valid numbers"
+        
+        # Check for duplicate date
+        df = st.session_state.markets_df[market]
+        if date_obj in df['Date'].values:
+            return False, f"Data for {new_date} already exists. Use edit instead."
+        
+        # Calculate derived values
+        total = longs + shorts
+        if total > 0:
+            long_pct = (longs / total * 100)
+            short_pct = (shorts / total * 100)
+        else:
+            long_pct = 0
+            short_pct = 0
+        net = longs - shorts
+        
+        # Create new row
+        new_row = pd.DataFrame([{
+            'Date': date_obj,
+            'Longs': longs,
+            'Shorts': shorts,
+            'Total': total,
+            'Long %': round(long_pct, 1),
+            'Short %': round(short_pct, 1),
+            'Net': net
+        }])
+        
+        # Add to dataframe
+        updated_df = pd.concat([df, new_row], ignore_index=True)
+        updated_df = updated_df.sort_values('Date', ascending=True).reset_index(drop=True)
+        
+        # Update session state
+        st.session_state.markets_df[market] = updated_df
+        
+        # Auto-save
+        save_to_json()
+        
+        return True, f"✅ Added data for {new_date}"
+        
+    except Exception as e:
+        return False, f"Error adding row: {str(e)}"
+
+def edit_row(market, row_index, new_longs, new_shorts):
+    """
+    Edit an existing row of data
+    Returns (success, message)
+    """
+    try:
+        if market not in st.session_state.markets_df:
+            return False, f"Market {market} not found"
+        
+        df = st.session_state.markets_df[market].copy()
+        
+        if row_index < 0 or row_index >= len(df):
+            return False, f"Row index {row_index} out of range"
+        
+        # Validate numbers
+        try:
+            longs = float(new_longs)
+            shorts = float(new_shorts)
+            if longs < 0 or shorts < 0:
+                return False, "Longs and Shorts must be positive numbers"
+        except:
+            return False, "Longs and Shorts must be valid numbers"
+        
+        # Update values
+        df.loc[row_index, 'Longs'] = longs
+        df.loc[row_index, 'Shorts'] = shorts
+        
+        # Recalculate derived columns
+        total = longs + shorts
+        df.loc[row_index, 'Total'] = total
+        if total > 0:
+            df.loc[row_index, 'Long %'] = round(longs / total * 100, 1)
+            df.loc[row_index, 'Short %'] = round(shorts / total * 100, 1)
+        else:
+            df.loc[row_index, 'Long %'] = 0
+            df.loc[row_index, 'Short %'] = 0
+        df.loc[row_index, 'Net'] = longs - shorts
+        
+        # Update session state
+        st.session_state.markets_df[market] = df
+        
+        # Auto-save
+        save_to_json()
+        
+        return True, f"✅ Updated row {row_index + 1}"
+        
+    except Exception as e:
+        return False, f"Error editing row: {str(e)}"
+
+def delete_row(market, row_index):
+    """
+    Delete a row from a market
+    Returns (success, message)
+    """
+    try:
+        if market not in st.session_state.markets_df:
+            return False, f"Market {market} not found"
+        
+        df = st.session_state.markets_df[market]
+        
+        if row_index < 0 or row_index >= len(df):
+            return False, f"Row index {row_index} out of range"
+        
+        # Get date for message
+        deleted_date = df.iloc[row_index]['Date'].strftime('%Y-%m-%d')
+        
+        # Delete row
+        updated_df = df.drop(df.index[row_index]).reset_index(drop=True)
+        
+        # Update session state
+        st.session_state.markets_df[market] = updated_df
+        
+        # Auto-save
+        save_to_json()
+        
+        return True, f"✅ Deleted data for {deleted_date}"
+        
+    except Exception as e:
+        return False, f"Error deleting row: {str(e)}"
+
+def insert_missing_week(market, target_date):
+    """
+    Intelligently insert a missing week by interpolating between adjacent weeks
+    """
+    try:
+        if market not in st.session_state.markets_df:
+            return False, f"Market {market} not found"
+        
+        df = st.session_state.markets_df[market]
+        date_obj = pd.to_datetime(target_date)
+        
+        # Check if date already exists
+        if date_obj in df['Date'].values:
+            return False, f"Data for {target_date} already exists"
+        
+        # Find surrounding dates
+        all_dates = df['Date'].tolist()
+        all_dates.sort()
+        
+        # Find closest dates before and after
+        before_date = None
+        after_date = None
+        
+        for d in all_dates:
+            if d < date_obj:
+                before_date = d
+            if d > date_obj and after_date is None:
+                after_date = d
+        
+        if before_date is None or after_date is None:
+            return False, "Need data before AND after the missing week to interpolate"
+        
+        # Get data for surrounding weeks
+        before_row = df[df['Date'] == before_date].iloc[0]
+        after_row = df[df['Date'] == after_date].iloc[0]
+        
+        # Calculate days difference for interpolation
+        total_days = (after_date - before_date).days
+        days_from_before = (date_obj - before_date).days
+        weight = days_from_before / total_days if total_days > 0 else 0.5
+        
+        # Interpolate values
+        interpolated_longs = before_row['Longs'] + weight * (after_row['Longs'] - before_row['Longs'])
+        interpolated_shorts = before_row['Shorts'] + weight * (after_row['Shorts'] - before_row['Shorts'])
+        
+        # Round to integers
+        longs = round(interpolated_longs)
+        shorts = round(interpolated_shorts)
+        
+        # Add the interpolated row
+        success, message = add_new_row(market, target_date, longs, shorts)
+        
+        if success:
+            return True, f"✅ Inserted interpolated data for {target_date} (based on {before_date.strftime('%Y-%m-%d')} and {after_date.strftime('%Y-%m-%d')})"
+        else:
+            return False, message
+            
+    except Exception as e:
+        return False, f"Error interpolating week: {str(e)}"
+
+def bulk_edit_mode(market):
+    """
+    Display bulk editing interface for a market
+    """
+    st.subheader(f"✏️ BULK EDIT: {market}")
+    
+    df = st.session_state.markets_df[market].copy()
+    
+    # Display current data
+    st.write("Current Data (showing last 20 rows):")
+    display_df = df.tail(20).copy()
+    display_df['Date'] = display_df['Date'].dt.strftime('%Y-%m-%d')
+    
+    edited_df = st.data_editor(
+        display_df[['Date', 'Longs', 'Shorts']],
+        use_container_width=True,
+        num_rows="dynamic",
+        key=f"bulk_editor_{market}",
+        column_config={
+            "Date": st.column_config.DateColumn("Date", format="YYYY-MM-DD"),
+            "Longs": st.column_config.NumberColumn("Longs", min_value=0, format="%d"),
+            "Shorts": st.column_config.NumberColumn("Shorts", min_value=0, format="%d"),
+        }
+    )
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        if st.button("💾 Save All Changes", key=f"bulk_save_{market}"):
+            try:
+                # Convert back to proper format
+                edited_df['Date'] = pd.to_datetime(edited_df['Date'])
+                
+                # Merge with full dataset
+                full_df = df.copy()
+                for _, row in edited_df.iterrows():
+                    mask = full_df['Date'] == row['Date']
+                    if mask.any():
+                        # Update existing
+                        full_df.loc[mask, 'Longs'] = row['Longs']
+                        full_df.loc[mask, 'Shorts'] = row['Shorts']
+                    else:
+                        # Add new
+                        total = row['Longs'] + row['Shorts']
+                        new_row = pd.DataFrame([{
+                            'Date': row['Date'],
+                            'Longs': row['Longs'],
+                            'Shorts': row['Shorts'],
+                            'Total': total,
+                            'Long %': round(row['Longs']/total*100, 1) if total > 0 else 0,
+                            'Short %': round(row['Shorts']/total*100, 1) if total > 0 else 0,
+                            'Net': row['Longs'] - row['Shorts']
+                        }])
+                        full_df = pd.concat([full_df, new_row], ignore_index=True)
+                
+                full_df = full_df.sort_values('Date').drop_duplicates('Date', keep='last').reset_index(drop=True)
+                st.session_state.markets_df[market] = full_df
+                save_to_json()
+                st.success("✅ All changes saved!")
+                st.rerun()
+                
+            except Exception as e:
+                st.error(f"Error saving: {str(e)}")
+    
+    with col2:
+        if st.button("➕ Add Empty Row", key=f"add_empty_{market}"):
+            # Add a blank row with today's date
+            today = datetime.now().strftime('%Y-%m-%d')
+            success, msg = add_new_row(market, today, 0, 0)
+            if success:
+                st.success(msg)
+                st.rerun()
+            else:
+                st.error(msg)
+    
+    with col3:
+        if st.button("❌ Cancel", key=f"cancel_bulk_{market}"):
+            st.session_state.edit_mode = False
+            st.rerun()
+
 # -------------------------------
 # DATA PERSISTENCE FUNCTIONS
 # -------------------------------
@@ -913,11 +1203,83 @@ def add_new_data(markets_df, display_name, new_date, new_data):
     markets_df[display_name] = updated_df
     
     return markets_df
+"""
 
 # -------------------------------
 # DATA EDITING FUNCTIONS
 # -------------------------------
+# Edit button for this market
+if st.session_state.edit_mode and st.session_state.current_editing_market is None:
+    col_e1, col_e2, col_e3 = st.columns(3)
+    with col_e1:
+        if st.button(f"✏️ Quick Edit {market}", key=f"quick_edit_{market}"):
+            st.session_state.current_editing_market = market
+            st.session_state.edit_submode = 'quick'
+            st.rerun()
+    with col_e2:
+        if st.button(f"📝 Bulk Edit {market}", key=f"bulk_edit_{market}"):
+            st.session_state.current_editing_market = market
+            st.session_state.edit_submode = 'bulk'
+            st.rerun()
+    with col_e3:
+        if st.button(f"🔍 Insert Missing Week", key=f"insert_{market}"):
+            st.session_state.current_editing_market = market
+            st.session_state.edit_submode = 'insert'
+            st.rerun()
 
+# Handle different edit modes
+if st.session_state.edit_mode and st.session_state.current_editing_market == market:
+    if st.session_state.get('edit_submode') == 'quick':
+        # Your existing quick edit code
+        st.subheader("✏️ QUICK EDIT MODE")
+        # ... (keep your existing quick edit code)
+        
+    elif st.session_state.get('edit_submode') == 'bulk':
+        # New bulk edit mode
+        bulk_edit_mode(market)
+        
+    elif st.session_state.get('edit_submode') == 'insert':
+        # Insert missing week mode
+        st.subheader(f"🔍 INSERT MISSING WEEK - {market}")
+        
+        # Show available dates
+        df = st.session_state.markets_df[market]
+        st.write("Current data range:")
+        st.write(f"From: {df['Date'].min().strftime('%Y-%m-%d')}")
+        st.write(f"To: {df['Date'].max().strftime('%Y-%m-%d')}")
+        
+        # Input for missing date
+        missing_date = st.date_input(
+            "Select date to insert",
+            value=df['Date'].max() + timedelta(days=7),
+            min_value=df['Date'].min() + timedelta(days=7),
+            max_value=df['Date'].max() - timedelta(days=7)
+        )
+        
+        col_i1, col_i2, col_i3 = st.columns(3)
+        with col_i1:
+            if st.button("📊 Auto-Interpolate", key=f"interpolate_{market}"):
+                success, msg = insert_missing_week(market, missing_date.strftime('%Y-%m-%d'))
+                if success:
+                    st.success(msg)
+                    st.session_state.edit_mode = False
+                    st.rerun()
+                else:
+                    st.error(msg)
+        
+        with col_i2:
+            if st.button("➕ Add Manual", key=f"manual_{market}"):
+                # Switch to quick edit with this date pre-filled
+                st.session_state.edit_prefill_date = missing_date
+                st.session_state.edit_submode = 'quick'
+                st.rerun()
+        
+        with col_i3:
+            if st.button("❌ Cancel", key=f"cancel_insert_{market}"):
+                st.session_state.edit_mode = False
+                st.rerun()
+
+"""
 def save_edited_data(market, edited_df):
     """Save edited data back to session state"""
     st.session_state.markets_df[market] = edited_df
@@ -932,7 +1294,7 @@ def cancel_edit():
     st.session_state.edit_mode = False
     st.session_state.editable_df = None
     st.session_state.current_editing_market = None
-
+"""
 # -------------------------------
 # ENHANCED MARKET ANALYSIS WITH PEAK VALUES AND TOGGLE SECTIONS
 # -------------------------------
@@ -1581,6 +1943,7 @@ st.caption("✅ **DUPLICATE CHECK**: Won't fetch same data twice")
 st.caption("✅ **EDIT MODE**: Manually add/edit missing data")
 st.caption("✅ **TOGGLE SECTIONS**: Each analysis section can be hidden/shown")
 st.caption("✅ **BIAS SHIFT ALERTS**: Warns when positioning shifts >15% from 13-week average")
+
 
 
 
