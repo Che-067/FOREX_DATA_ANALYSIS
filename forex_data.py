@@ -95,14 +95,14 @@ PEAK_VOLUME_VALUES = {
         'has_peaks': True
     },
     'EUR/USD': {
-        'peak_longs': 266078,
+        'peak_longs': 318702,
         'peak_shorts': 271608,
         'min_longs': 17040,
         'min_shorts': 8524,
         'has_peaks': True
     },
     'GBP/USD': {
-        'peak_longs': 188489,
+        'peak_longs': 332405,
         'peak_shorts': 154332,
         'min_longs': None,
         'min_shorts': None,
@@ -124,9 +124,21 @@ PEAK_VOLUME_VALUES = {
     },
     'USD/ZAR': {'has_peaks': False},
     'USD/MXN': {'has_peaks': False},
-    'NZD/USD': {'has_peaks': False},
+    'NZD/USD': {
+        'peak_longs': 47255,
+        'peak_shorts': None,
+        'min_longs': 75548,
+        'min_shorts': None,
+        'has_peaks': True
+    },
     'USD/BRL': {'has_peaks': False},
-    'USD/CHF': {'has_peaks': False},
+    'USD/CHF': {
+        'peak_longs': 89522,
+        'peak_shorts': 37165,
+        'min_longs': 2419,
+        'min_shorts': 698,
+        'has_peaks': True
+    },
     
     # ===== METALS =====
     'XAU/USD': {
@@ -1560,3 +1572,4 @@ st.caption("✅ **DUPLICATE CHECK**: Won't fetch same data twice")
 st.caption("✅ **EDIT MODE**: Manually add/edit missing data")
 st.caption("✅ **TOGGLE SECTIONS**: Each analysis section can be hidden/shown")
 st.caption("✅ **BIAS SHIFT ALERTS**: Warns when positioning shifts >15% from 13-week average")
+
